@@ -111,7 +111,9 @@ export default function App() {
   const [res, setRes] = useState(null);
   const [saved, setSaved] = useState(false);
   const [showLedger, setShowLedger] = useState(false);
-  const [showRoll, setShowRoll] = useState(false);
+  const [showRoll, setShowRoll] = useState(false); // רק כדי לפתוח כשכבר יש חלוקה
+  // הנוכחות פתוחה כל עוד אין חלוקה על המסך; אחריה היא מתקפלת לשורת סיכום
+  const rollOpen = !res || showRoll;
   const [drawErr, setDrawErr] = useState("");
   const [transfer, setTransfer] = useState(null); // טקסט הפנקס לייצוא/ייבוא
   const [note, setNote] = useState("");
@@ -212,6 +214,7 @@ export default function App() {
     const r = bestDraw(pool, k, ledger);
     setRes(r);
     setSaved(false);
+    if (r) setShowRoll(false);
     setDrawErr(
       r
         ? ""
@@ -334,20 +337,6 @@ export default function App() {
           >
             {teacherOn ? "✓ " : ""}תומר בהרכבים
           </button>
-          <button
-            onClick={() => setShowRoll(!showRoll)}
-            aria-expanded={showRoll}
-            style={{
-              ...btn("transparent", absent.size ? C.rose : C.dim),
-              border: `1px solid ${absent.size ? C.rose + "88" : C.line}`,
-            }}
-            title="סמן מי לא הגיע היום. נעדר לא נכנס להגרלה ולא צובר הרכבים בפנקס"
-          >
-            נוכחות {present.length}/{roster.length}
-          </button>
-          <button onClick={draw} style={{ ...btn(C.teal, "#0C2320"), marginRight: "auto" }}>
-            חלק מחדש
-          </button>
         </div>
         <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginTop: 12 }}>
           <button
@@ -364,12 +353,6 @@ export default function App() {
           </button>
           <span style={{ color: C.dim, fontSize: 13 }}>{gMsg || (gOn ? "" : "בלי חיבור, הפנקס נשמר רק במכשיר הזה")}</span>
         </div>
-        {absent.size > 0 && (
-          <p style={{ color: C.dim, fontSize: 13, margin: "10px 0 0", lineHeight: 1.6 }}>
-            עם {present.length} הנוכחים אפשר עד {caps.max} הרכבים
-            {neck.limit <= caps.max ? ` — ${ROLE_LABEL[neck.role]} נוכחים: ${neck.count}` : ""}.
-          </p>
-        )}
         <p style={{ color: C.dim, fontSize: 14, margin: "12px 0 0", lineHeight: 1.6 }}>
           {ledger.lessons
             ? `${ledger.lessons} שיעורים בפנקס · ממוצע ${avg} הרכבים לתלמיד. החלוקה מעדיפה את מי שצבר פחות.`
@@ -377,66 +360,86 @@ export default function App() {
         </p>
       </div>
 
-      {showRoll && (
-        <section style={{ maxWidth: 760, margin: "0 auto 16px", background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14, padding: 16 }}>
-          <div style={{ color: C.dim, fontSize: 14, marginBottom: 12, lineHeight: 1.6 }}>
-            לחץ על מי שלא הגיע. נעדר לא נכנס להגרלה וגם לא צובר הרכבים בפנקס — ולכן תהיה לו עדיפות בשיעור הבא.
-            הסימון נמחק מעצמו בסוף היום.
-          </div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-            {roster.map((s) => {
-              const out = absent.has(s.id);
-              return (
-                <button
-                  key={s.id}
-                  onClick={() => toggleAbsent(s.id)}
-                  aria-pressed={out}
-                  style={{
-                    display: "flex",
-                    alignItems: "baseline",
-                    gap: 6,
-                    padding: "7px 12px",
-                    borderRadius: 999,
-                    cursor: "pointer",
-                    fontFamily: "inherit",
-                    fontSize: 15,
-                    background: out ? "transparent" : "rgba(255,255,255,0.06)",
-                    border: `1px solid ${out ? C.line : C.teal + "66"}`,
-                    color: out ? C.dim : C.ink,
-                    textDecoration: out ? "line-through" : "none",
-                  }}
-                >
-                  {s.name}
-                  <span style={{ color: out ? C.dim : TINT[s.instruments[0]] || C.dim, fontSize: 13 }}>
-                    {s.instruments[0]}
-                  </span>
+      {/* הנוכחות היא השלב שלפני החלוקה, ולכן היא פתוחה כל עוד אין תוצאה
+          וכפתור החלוקה יושב בסופה. ברגע שיש חלוקה היא מתקפלת לשורה אחת. */}
+      <section style={{ maxWidth: 760, margin: "0 auto 16px", background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14, padding: 16 }}>
+        {rollOpen ? (
+          <>
+            <h2 style={{ fontFamily: "'Frank Ruhl Libre', serif", fontSize: 20, margin: "0 0 6px" }}>מי כאן היום?</h2>
+            <div style={{ color: C.dim, fontSize: 14, marginBottom: 12, lineHeight: 1.6 }}>
+              לחץ על מי שלא הגיע. נעדר לא נכנס לחלוקה וגם לא צובר הרכבים בפנקס — ולכן תהיה לו עדיפות
+              בשיעור הבא. הסימון נמחק מעצמו בסוף היום.
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              {roster.map((s) => {
+                const out = absent.has(s.id);
+                return (
+                  <button
+                    key={s.id}
+                    onClick={() => toggleAbsent(s.id)}
+                    aria-pressed={out}
+                    style={{
+                      display: "flex",
+                      alignItems: "baseline",
+                      gap: 6,
+                      padding: "7px 12px",
+                      borderRadius: 999,
+                      cursor: "pointer",
+                      fontFamily: "inherit",
+                      fontSize: 15,
+                      background: out ? "transparent" : "rgba(255,255,255,0.06)",
+                      border: `1px solid ${out ? C.line : C.teal + "66"}`,
+                      color: out ? C.dim : C.ink,
+                      textDecoration: out ? "line-through" : "none",
+                    }}
+                  >
+                    {s.name}
+                    <span style={{ color: out ? C.dim : TINT[s.instruments[0]] || C.dim, fontSize: 13 }}>
+                      {s.instruments[0]}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            {absent.size > 0 && (
+              <p style={{ color: C.dim, fontSize: 13, margin: "12px 0 0", lineHeight: 1.6 }}>
+                {present.length} נוכחים · אפשר עד {caps.max} הרכבים
+                {neck.limit <= caps.max ? ` — ${ROLE_LABEL[neck.role]} נוכחים: ${neck.count}` : ""}.
+              </p>
+            )}
+            <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginTop: 14 }}>
+              <button onClick={draw} style={btn(C.teal, "#0C2320")}>
+                {res ? "חלק מחדש" : `חלק את ${present.length} הנוכחים ל-${k} הרכבים`}
+              </button>
+              {absent.size > 0 && (
+                <button onClick={clearAbsent} style={{ ...btn("transparent", C.dim), border: `1px solid ${C.line}`, padding: "8px 14px", fontSize: 14 }}>
+                  כולם נוכחים
                 </button>
-              );
-            })}
-          </div>
-          {absent.size > 0 && (
+              )}
+            </div>
+          </>
+        ) : (
+          <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+            <span style={{ fontSize: 15, color: absent.size ? C.rose : C.dim }}>
+              {absent.size ? `${present.length} מתוך ${roster.length} נוכחים` : "כל הכיתה נוכחת"}
+            </span>
             <button
-              onClick={clearAbsent}
-              style={{ ...btn("transparent", C.dim), border: `1px solid ${C.line}`, marginTop: 12, padding: "8px 14px", fontSize: 14 }}
+              onClick={() => setShowRoll(true)}
+              style={{ ...btn("transparent", C.ink), border: `1px solid ${C.line}`, padding: "8px 14px", fontSize: 14 }}
             >
-              כולם נוכחים
+              שנה נוכחות
             </button>
-          )}
-        </section>
-      )}
+            <button onClick={draw} style={{ ...btn(C.teal, "#0C2320"), marginRight: "auto" }}>
+              חלק מחדש
+            </button>
+          </div>
+        )}
+      </section>
 
       <main style={{ maxWidth: 760, margin: "0 auto" }}>
         {!res && drawErr && (
           <div style={{ border: `1px solid ${C.rose}66`, borderRadius: 14, padding: "24px 20px", textAlign: "center", color: C.rose, lineHeight: 1.6 }}>
             {drawErr}
-          </div>
-        )}
-
-        {!res && !drawErr && (
-          <div style={{ border: `1px dashed ${C.line}`, borderRadius: 14, padding: "44px 20px", textAlign: "center", color: C.dim }}>
-            {absent.size
-              ? `${present.length} נוכחים מתוך ${roster.length} בכיתה ${cls}. לחץ ״חלק מחדש״.`
-              : `${roster.length} תלמידים בכיתה ${cls}. לחץ ״חלק מחדש״.`}
           </div>
         )}
 
