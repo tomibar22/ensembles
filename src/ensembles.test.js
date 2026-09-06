@@ -8,6 +8,8 @@ import {
   MAX_GROUP,
   EMPTY,
   applyLesson,
+  addToDraw,
+  removeFromDraw,
   buildRoster,
   pairKey,
   attempt,
@@ -134,6 +136,104 @@ test("applyLesson לא משנה את הבסיס, כדי שאפשר יהיה לב
   const snapshot = JSON.parse(JSON.stringify(base));
   applyLesson(roster, bestDraw([...roster, TEACHER], 3, base), base);
   assert.deepEqual(base, snapshot, "הבסיס שונה במקום להיות מועתק");
+});
+
+/* ==================== שינוי נוכחות באמצע השיעור ==================== */
+
+const drawFor = (cls, k) => bestDraw([...ROSTERS[cls], TEACHER], k, EMPTY);
+
+test("מי שהגיע באיחור נכנס להרכב בלי לפרק את השאר", () => {
+  const cls = "י״א";
+  const roster = ROSTERS[cls];
+  const late = roster.find((s) => s.instruments[0] === "שירה");
+  const present = roster.filter((s) => s.id !== late.id);
+  const before = bestDraw([...present, TEACHER], 4, EMPTY);
+  const after = addToDraw(before, late, EMPTY);
+  assert.ok(after, "לא נמצא כיסא למי שהגיע");
+
+  // כל שאר ההרכבים זהים לחלוטין — אף אחד לא הוזז
+  after.groups.forEach((g, i) => {
+    const without = g.filter((m) => m.id !== late.id);
+    assert.deepEqual(
+      without.map((m) => m.id + ":" + m.playing),
+      before.groups[i].map((m) => m.id + ":" + m.playing),
+      `הרכב ${i + 1} השתנה`
+    );
+  });
+  const joinedTo = after.groups.findIndex((g) => g.some((m) => m.id === late.id));
+  assert.equal(joinedTo, after.joined);
+  assert.equal(after.load[late.id], 1);
+});
+
+test("מי שכבר בחלוקה לא נכנס פעמיים", () => {
+  const r = drawFor("ט׳", 3);
+  const inside = r.groups[0][0];
+  assert.equal(addToDraw(r, inside, EMPTY), null);
+});
+
+test("כשאין כיסא פנוי מדווחים במקום לדחוף בכוח", () => {
+  // מתופף נוסף כשכל ההרכבים כבר מלאים בתופים
+  const r = drawFor("ט׳", 3);
+  r.groups.forEach((g) => assert.ok(g.some((m) => m.playing === "תופים")));
+  const extraDrummer = { id: "חדש-מתופף", name: "חדש", instruments: ["תופים"], roles: ["drums"] };
+  assert.equal(addToDraw(r, extraDrummer, EMPTY), null);
+});
+
+test("מי שממלא תפקיד חסר מקבל עדיפות על ההרכב הקטן", () => {
+  const r = drawFor("ט׳", 3);
+  // בסיסט שמנגן בהרכב אחד בלבד: הוצאתו פותחת חור יחיד, שאפשר לבדוק במדויק
+  const bassist = r.groups.flat().find((m) => m.playing === "בס" && r.load[m.id] === 1);
+  const at = r.groups.findIndex((g) => g.some((m) => m.id === bassist.id));
+  const gapped = removeFromDraw(r, bassist.id);
+  assert.ok(gapped.broken.some((b) => b.group === at && b.missing.includes("bass")));
+  const back = addToDraw(gapped, bassist, EMPTY);
+  assert.equal(back.joined, at, "הבסיסט לא חזר להרכב שנשאר בלי בס");
+  assert.ok(
+    !removeFromDraw(back, "אף-אחד").broken.some((b) => b.group === at),
+    "ההרכב עדיין חסר תפקיד אחרי ההשלמה"
+  );
+});
+
+test("תלמיד שמנגן בשני הרכבים משאיר שני חורים כשהוא יוצא", () => {
+  const r = drawFor("ט׳", 3);
+  const twice = r.groups.flat().find((m) => r.load[m.id] === 2 && !m.teacher);
+  if (!twice) return; // לא בכל חלוקה יש כזה
+  const out = removeFromDraw(r, twice.id);
+  assert.equal(out.broken.length, 2, "לא דווח על שני ההרכבים");
+  // החזרה ממלאת אחד מהם — המורה רואה בהודעה שהשני עדיין חסר
+  const back = addToDraw(out, twice, EMPTY);
+  assert.equal(removeFromDraw(back, "אף-אחד").broken.length, 1);
+});
+
+test("הוצאת תלמיד לא נוגעת בשאר ומדווחת על תפקיד שנפער", () => {
+  const r = drawFor("ט׳", 3);
+  const drummer = r.groups[0].find((m) => m.playing === "תופים");
+  const out = removeFromDraw(r, drummer.id);
+  assert.ok(!out.groups.flat().some((m) => m.id === drummer.id), "התלמיד עדיין בחלוקה");
+  assert.equal(out.load[drummer.id], undefined);
+  assert.ok(
+    out.broken.some((b) => b.missing.includes("drums")),
+    "לא דווח שההרכב נשאר בלי תופים"
+  );
+  // ההרכבים שלא נגעו בהם זהים
+  out.groups.forEach((g, i) => {
+    if (r.groups[i].some((m) => m.id === drummer.id)) return;
+    assert.deepEqual(g.map((m) => m.id), r.groups[i].map((m) => m.id), `הרכב ${i + 1} השתנה`);
+  });
+});
+
+test("הוצאה והחזרה לא משנות את סך הניגון בפנקס", () => {
+  const cls = "ט׳";
+  const roster = ROSTERS[cls];
+  const r = drawFor(cls, 3);
+  const someone = r.groups[2].find((m) => !m.teacher && m.slot === "melody");
+  const back = addToDraw(removeFromDraw(r, someone.id), roster.find((s) => s.id === someone.id), EMPTY);
+  const before = applyLesson(roster, r, EMPTY);
+  const after = applyLesson(roster, back, EMPTY);
+  assert.equal(
+    roster.reduce((a, s) => a + (after.plays[s.id] || 0), 0),
+    roster.reduce((a, s) => a + (before.plays[s.id] || 0), 0)
+  );
 });
 
 /* ============================ capacity ============================ */

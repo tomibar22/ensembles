@@ -220,6 +220,63 @@ function bestDraw(roster, k, ledger, tries = 160) {
   return all.reduce((best, r) => (cost(r, ledger) < cost(best, ledger) ? r : best));
 }
 
+const ROLE_MISSING = { drums: "תופים", bass: "בס", harmony: "כלי הרמוני" };
+
+/** אילו תפקידים חיוניים חסרים בהרכב. לפי הכלי שמנגנים בפועל, ולא לפי ה-slot,
+    כי גיטריסט שנכנס כתוספת מסומן melody אבל עדיין ממלא תפקיד הרמוני. */
+const missingRoles = (g) =>
+  ["drums", "bass", "harmony"].filter((r) => !g.some((m) => ROLE_OF[m.playing] === r));
+
+/**
+ * מכניס תלמיד לחלוקה קיימת בלי לפרק אותה — בשביל מי שהגיע באמצע השיעור.
+ * בוחר את ההרכב שהכי מתאים: קודם כל אחד שחסר בו תפקיד חיוני שהתלמיד ממלא,
+ * אחר כך ההרכב הקטן ביותר, ומי שהוא ניגן איתו הכי מעט.
+ * מחזיר null אם אין לו כיסא פנוי באף הרכב.
+ */
+function addToDraw(res, student, ledger) {
+  if (res.groups.some((g) => g.some((m) => m.id === student.id))) return null;
+  let best = null;
+  let bestInst = null;
+  let bestScore = Infinity;
+  res.groups.forEach((g, i) => {
+    const fam = g.reduce((a, m) => a + (ledger.pairs[pairKey(student.id, m.id)] || 0), 0);
+    const gaps = missingRoles(g);
+    student.instruments.forEach((inst, ord) => {
+      if (UNIQUE.has(inst) && g.some((m) => m.playing === inst)) return;
+      const fills = gaps.includes(ROLE_OF[inst]) ? -1000 : 0; // סותם חור אמיתי
+      const same = g.filter((m) => m.playing === inst).length;
+      const score = fills + g.length * 25 + same * 40 + fam * 6 + ord * 8;
+      if (score < bestScore) (bestScore = score), (best = i), (bestInst = inst);
+    });
+  });
+  if (best === null) return null;
+  const joined = { ...student, playing: bestInst, slot: ROLE_OF[bestInst] || "melody" };
+  return {
+    groups: res.groups.map((g, i) =>
+      i === best ? [...g, joined].sort((a, b) => orderOf(a.playing) - orderOf(b.playing)) : g
+    ),
+    load: { ...res.load, [student.id]: (res.load[student.id] || 0) + 1 },
+    bench: res.bench.filter((s) => s.id !== student.id),
+    joined: best,
+  };
+}
+
+/**
+ * מוציא תלמיד מחלוקה קיימת — למי שהתברר שאינו כאן.
+ * מדווח אילו הרכבים נשארו בלי תפקיד חיוני, כדי שהמורה ידע ולא יגלה תוך כדי נגינה.
+ */
+function removeFromDraw(res, id) {
+  const groups = res.groups.map((g) => g.filter((m) => m.id !== id));
+  const load = { ...res.load };
+  delete load[id];
+  const broken = [];
+  groups.forEach((g, i) => {
+    const missing = missingRoles(g);
+    if (missing.length) broken.push({ group: i, missing });
+  });
+  return { groups, load, bench: res.bench, broken };
+}
+
 const EMPTY = { plays: {}, pairs: {}, lessons: 0 };
 
 /**
@@ -400,7 +457,10 @@ export {
   ROLE_LABEL,
   ORDER,
   EMPTY,
+  ROLE_MISSING,
   applyLesson,
+  addToDraw,
+  removeFromDraw,
   buildRoster,
   pairKey,
   makeGroups,

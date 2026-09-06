@@ -9,6 +9,9 @@ import {
   ROLE_LABEL,
   EMPTY,
   applyLesson,
+  addToDraw,
+  removeFromDraw,
+  ROLE_MISSING,
   pairKey,
   bestDraw,
   capacity,
@@ -128,6 +131,7 @@ export default function App() {
   // הנוכחות פתוחה כל עוד אין חלוקה על המסך; אחריה היא מתקפלת לשורת סיכום
   const rollOpen = !res || showRoll;
   const [drawErr, setDrawErr] = useState("");
+  const [liveMsg, setLiveMsg] = useState(""); // מה קרה לחלוקה אחרי שינוי נוכחות תוך כדי שיעור
   const [showHelp, setShowHelp] = useState(false);
   // הפנקס כפי שהיה לפני שהשיעור הזה נשמר — הבסיס לשמירה חוזרת ולביטול
   const [lessonBase, setLessonBase] = useState(null);
@@ -148,6 +152,7 @@ export default function App() {
     setRes(null);
     setSaved(false);
     setDrawErr("");
+    setLiveMsg("");
     let alive = true;
     (async () => {
       let l = EMPTY;
@@ -166,14 +171,44 @@ export default function App() {
     setDrawErr("");
   }, [teacherOn]);
 
+  /* מישהו הגיע באיחור או יצא באמצע. אין סיבה לפרק הרכבים שכבר מנגנים —
+     מכניסים או מוציאים אותו מהחלוקה הקיימת, ומדווחים מה קרה. */
   const toggleAbsent = (id) => {
+    const leaving = !absent.has(id);
     const next = new Set(absent);
-    next.has(id) ? next.delete(id) : next.add(id);
+    leaving ? next.add(id) : next.delete(id);
     setAbsent(next);
     saveAbsent(cls, [...next]);
-    setRes(null);
     setSaved(false);
     setDrawErr("");
+
+    if (!res) return setLiveMsg("");
+    const student = roster.find((s) => s.id === id);
+    const gapText = (broken) =>
+      broken
+        .map((b) => `הרכב ${b.group + 1} נשאר בלי ${b.missing.map((r) => ROLE_MISSING[r]).join(" ובלי ")}`)
+        .join(", ");
+
+    if (leaving) {
+      const out = removeFromDraw(res, id);
+      setRes(out);
+      setLiveMsg(
+        out.broken.length
+          ? `${student.name} יצא מהחלוקה · ${gapText(out.broken)}. אפשר לחלק מחדש.`
+          : `${student.name} יצא מהחלוקה.`
+      );
+    } else {
+      const added = addToDraw(res, student, ledger);
+      if (!added) {
+        setLiveMsg(`אין כיסא פנוי ל${student.name} (${student.instruments[0]}) באף הרכב — צריך לחלק מחדש.`);
+        return;
+      }
+      setRes(added);
+      const left = removeFromDraw(added, "").broken;
+      setLiveMsg(
+        `${student.name} הצטרף להרכב ${added.joined + 1}.` + (left.length ? ` ${gapText(left)}.` : "")
+      );
+    }
   };
 
   const clearAbsent = () => {
@@ -182,6 +217,7 @@ export default function App() {
     setRes(null);
     setSaved(false);
     setDrawErr("");
+    setLiveMsg("");
   };
 
   // משיכה מהגיליון: מקור האמת. localStorage נשאר כמטמון לשיעור בלי רשת.
@@ -234,6 +270,7 @@ export default function App() {
     const r = bestDraw(pool, k, ledger);
     setRes(r);
     setSaved(false);
+    setLiveMsg("");
     if (r) setShowRoll(false);
     setDrawErr(
       r
@@ -507,6 +544,23 @@ export default function App() {
       </section>
 
       <main style={{ maxWidth: 760, margin: "0 auto" }}>
+        {liveMsg && (
+          <div
+            style={{
+              border: `1px solid ${C.teal}55`,
+              background: "rgba(99,183,166,0.08)",
+              borderRadius: 12,
+              padding: "11px 14px",
+              marginBottom: 12,
+              color: C.ink,
+              fontSize: 15,
+              lineHeight: 1.6,
+            }}
+          >
+            {liveMsg}
+          </div>
+        )}
+
         {!res && drawErr && (
           <div style={{ border: `1px solid ${C.rose}66`, borderRadius: 14, padding: "24px 20px", textAlign: "center", color: C.rose, lineHeight: 1.6 }}>
             {drawErr}
