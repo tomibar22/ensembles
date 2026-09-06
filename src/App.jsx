@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import * as Sheets from "./sheets.js";
 import {
   CLASSES,
@@ -121,7 +121,9 @@ export default function App() {
   const [gMsg, setGMsg] = useState("");
   const [gBusy, setGBusy] = useState(false);
   const ledgerRef = useRef(ledger);
-  ledgerRef.current = ledger;
+  useEffect(() => {
+    ledgerRef.current = ledger;
+  }, [ledger]);
 
   useEffect(() => {
     setKPick(null);
