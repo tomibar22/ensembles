@@ -277,6 +277,57 @@ function removeFromDraw(res, id) {
   return { groups, load, bench: res.bench, broken };
 }
 
+/**
+ * משלים תפקידים חיוניים שנפערו בחלוקה קיימת — בלי להזיז אף אחד ממקומו.
+ * זה מה ששומר על הכלל "תופים, בס וכלי הרמוני בכל הרכב" גם כשמישהו יוצא
+ * באמצע השיעור, במקום לפרק הכול ולחלק מחדש.
+ *
+ * מי שנכנס נבחר לפי אותם כללים כמו בחלוקה עצמה: קודם מי שעוד לא מנגן
+ * היום (כולל מי שיושב על הספסל), אחר כך המורה, ואחר כך מי שצבר הכי פחות
+ * הרכבים בפנקס. איש לא חורג מ-MAX_LOAD.
+ *
+ * `unfixable` מחזיר את מה שבאמת אי אפשר להשלים — למשל כשהמתופף היחיד
+ * בכיתה הלך הביתה. שם הכלל לא ניתן לשמירה, וצריך לחלק מחדש.
+ */
+function repairDraw(res, pool, ledger) {
+  const groups = res.groups.map((g) => [...g]);
+  const load = { ...res.load };
+  const filled = [];
+  groups.forEach((g, i) => {
+    for (const role of missingRoles(g)) {
+      const cands = pool.filter(
+        (s) =>
+          s.roles.includes(role) &&
+          !g.some((m) => m.id === s.id) &&
+          (load[s.id] || 0) < MAX_LOAD &&
+          !g.some((m) => m.playing === instFor(s, role))
+      );
+      if (!cands.length) continue;
+      const rank = (s) => (s.teacher ? 0.5 : load[s.id] || 0);
+      const debt = (s) => ledger.plays[s.id] || 0;
+      cands.sort((a, b) => rank(a) - rank(b) || debt(a) - debt(b) || a.roles.length - b.roles.length);
+      const pick = cands[0];
+      const inst = instFor(pick, role);
+      g.push({ ...pick, playing: inst, slot: role });
+      g.sort((a, b) => orderOf(a.playing) - orderOf(b.playing));
+      load[pick.id] = (load[pick.id] || 0) + 1;
+      filled.push({ group: i, role, id: pick.id, name: pick.name, instrument: inst });
+    }
+  });
+  const unfixable = [];
+  groups.forEach((g, i) => {
+    const missing = missingRoles(g);
+    if (missing.length) unfixable.push({ group: i, missing });
+  });
+  return {
+    groups,
+    load,
+    bench: res.bench.filter((s) => !filled.some((f) => f.id === s.id)),
+    filled,
+    unfixable,
+  };
+}
+
 const EMPTY = { plays: {}, pairs: {}, lessons: 0 };
 
 /**
@@ -461,6 +512,7 @@ export {
   applyLesson,
   addToDraw,
   removeFromDraw,
+  repairDraw,
   buildRoster,
   pairKey,
   makeGroups,

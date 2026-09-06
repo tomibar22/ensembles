@@ -6,10 +6,12 @@ import {
   TEACHER,
   MAX_LOAD,
   MAX_GROUP,
+  ROLE_OF,
   EMPTY,
   applyLesson,
   addToDraw,
   removeFromDraw,
+  repairDraw,
   buildRoster,
   pairKey,
   attempt,
@@ -234,6 +236,89 @@ test("הוצאה והחזרה לא משנות את סך הניגון בפנקס"
     roster.reduce((a, s) => a + (after.plays[s.id] || 0), 0),
     roster.reduce((a, s) => a + (before.plays[s.id] || 0), 0)
   );
+});
+
+/* ============ הכלל נשמר גם כשמישהו יוצא באמצע ============ */
+
+const rhythmOk = (groups) =>
+  groups.every((g) =>
+    ["drums", "bass", "harmony"].every((r) => g.some((m) => ROLE_OF[m.playing] === r))
+  );
+
+test("יציאת נגן ריתמיקה נסתמת, והכלל נשמר בכל ההרכבים", () => {
+  const cls = "י״א";
+  const roster = ROSTERS[cls];
+  let fixedCount = 0;
+  for (let t = 0; t < 25; t++) {
+    const r = bestDraw([...roster, TEACHER], 3, EMPTY);
+    for (const inst of ["תופים", "בס", "פסנתר"]) {
+      const victim = r.groups.flat().find((m) => m.playing === inst && !m.teacher);
+      if (!victim) continue;
+      const present = roster.filter((s) => s.id !== victim.id);
+      const fixed = repairDraw(removeFromDraw(r, victim.id), [...present, TEACHER], EMPTY);
+      assert.equal(fixed.unfixable.length, 0, `${inst}: לא הושלם ${JSON.stringify(fixed.unfixable)}`);
+      assert.ok(rhythmOk(fixed.groups), `${inst}: הרכב נשאר בלי ריתמיקה מלאה`);
+      fixedCount++;
+    }
+  }
+  assert.ok(fixedCount > 20, "לא נבדקו מספיק מקרים");
+});
+
+test("ההשלמה לא מזיזה אף אחד ממקומו", () => {
+  const roster = ROSTERS["י״א"];
+  const r = bestDraw([...roster, TEACHER], 3, EMPTY);
+  const victim = r.groups.flat().find((m) => m.playing === "בס" && !m.teacher);
+  const present = roster.filter((s) => s.id !== victim.id);
+  const fixed = repairDraw(removeFromDraw(r, victim.id), [...present, TEACHER], EMPTY);
+
+  fixed.groups.forEach((g, i) => {
+    const added = new Set(fixed.filled.filter((f) => f.group === i).map((f) => f.id));
+    const survivors = g.filter((m) => !added.has(m.id)).map((m) => m.id + ":" + m.playing);
+    const expected = r.groups[i]
+      .filter((m) => m.id !== victim.id)
+      .map((m) => m.id + ":" + m.playing);
+    assert.deepEqual(survivors, expected, `הרכב ${i + 1} השתנה מעבר להשלמה`);
+  });
+});
+
+test("ההשלמה מעדיפה מי שעוד לא מנגן היום על מי שכבר מנגן", () => {
+  const roster = ROSTERS["י״א"];
+  const r = bestDraw([...roster, TEACHER], 2, EMPTY); // k=2 משאיר ספסל
+  assert.ok(r.bench.length, "אין ספסל בחלוקה הזו");
+  const victim = r.groups.flat().find((m) => m.playing === "תופים" && !m.teacher);
+  const present = roster.filter((s) => s.id !== victim.id);
+  const fixed = repairDraw(removeFromDraw(r, victim.id), [...present, TEACHER], EMPTY);
+  fixed.filled.forEach((f) => {
+    const alsoPlaying = (r.load[f.id] || 0) > 0;
+    const freeDrummer = present.some(
+      (s) => s.roles.includes(f.role) && !(r.load[s.id] > 0) && s.id !== f.id
+    );
+    if (alsoPlaying) assert.ok(!freeDrummer, `${f.name} נבחר למרות שיש נגן פנוי`);
+  });
+});
+
+test("אף אחד לא חורג מהמכסה בגלל ההשלמה", () => {
+  const roster = ROSTERS["ט׳"];
+  const r = bestDraw([...roster, TEACHER], 3, EMPTY);
+  const victim = r.groups.flat().find((m) => m.playing === "תופים" && !m.teacher);
+  const present = roster.filter((s) => s.id !== victim.id);
+  const fixed = repairDraw(removeFromDraw(r, victim.id), [...present, TEACHER], EMPTY);
+  Object.entries(fixed.load).forEach(([id, n]) =>
+    assert.ok(n <= MAX_LOAD, `${id} מנגן ב-${n} הרכבים`)
+  );
+});
+
+test("כשבאמת אין מי שימלא — נאמר במפורש ולא מעמידים פנים", () => {
+  const roster = ROSTERS["ט׳"];
+  const drummers = roster.filter((s) => s.roles.includes("drums"));
+  const r = bestDraw([...roster, TEACHER], 2, EMPTY);
+  // כל המתופפים הולכים הביתה
+  const present = roster.filter((s) => !drummers.some((d) => d.id === s.id));
+  let stripped = r;
+  for (const d of drummers) stripped = removeFromDraw(stripped, d.id);
+  const fixed = repairDraw(stripped, [...present, TEACHER], EMPTY);
+  assert.ok(fixed.unfixable.length > 0, "לא דווח שאי אפשר להשלים");
+  fixed.unfixable.forEach((u) => assert.ok(u.missing.includes("drums")));
 });
 
 /* ============================ capacity ============================ */

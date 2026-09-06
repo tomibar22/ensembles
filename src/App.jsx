@@ -11,6 +11,7 @@ import {
   applyLesson,
   addToDraw,
   removeFromDraw,
+  repairDraw,
   ROLE_MISSING,
   pairKey,
   bestDraw,
@@ -190,12 +191,26 @@ export default function App() {
         .join(", ");
 
     if (leaving) {
-      const out = removeFromDraw(res, id);
+      // הכלל "תופים, בס וכלי הרמוני בכל הרכב" חייב להישמר גם עכשיו.
+      // מחשבים את הנוכחים מהסט החדש ולא מ-present, שעדיין מחזיק את מי שיצא.
+      const stillHere = roster.filter((sd) => !next.has(sd.id));
+      const nextPool = teacherOn ? [...stillHere, TEACHER] : stillHere;
+      const out = repairDraw(removeFromDraw(res, id), nextPool, ledger);
       setRes(out);
+      const fixes = out.filled
+        .map((f) => `${f.name} נכנס ב${f.instrument} להרכב ${f.group + 1}`)
+        .join(", ");
       setLiveMsg(
-        out.broken.length
-          ? `${student.name} יצא מהחלוקה · ${gapText(out.broken)}. אפשר לחלק מחדש.`
-          : `${student.name} יצא מהחלוקה.`
+        [
+          `${student.name} יצא מהחלוקה.`,
+          fixes && `${fixes} — כדי שלכל הרכב תישאר ריתמיקה מלאה.`,
+          // כשאי אפשר להשלים, אומרים גם מה כן אפשרי — אחרת ההודעה מתארת
+          // בעיה בלי לתת דרך פעולה
+          out.unfixable.length &&
+            `${gapText(out.unfixable)}, ואין מי שימלא — עם ${stillHere.length} הנוכחים אפשר עד ${capacity(nextPool).max} הרכבים.`,
+        ]
+          .filter(Boolean)
+          .join(" ")
       );
     } else {
       const added = addToDraw(res, student, ledger);
