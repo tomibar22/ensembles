@@ -67,6 +67,7 @@ const ROLE_OF = { "תופים": "drums", "בס": "bass", "פסנתר": "harmony"
 const UNIQUE = new Set(["תופים", "בס", "פסנתר", "גיטרה"]);
 const ORDER = ["תופים", "בס", "פסנתר", "גיטרה", "חצוצרה", "טרומבון", "אלט", "טנור", "חליל", "שירה"];
 const orderOf = (i) => (ORDER.indexOf(i) === -1 ? 99 : ORDER.indexOf(i));
+const CLASSES = Object.keys(RAW);
 const KEYS = { "ט׳": "ens-ledger-g9", "י״א": "ens-ledger-g11" };
 const TABS = { "ט׳": "g9", "י״א": "g11" }; // לשוניות בגיליון
 const MAX_LOAD = 2; // תלמיד לא ינגן ביותר משני הרכבים באותו שיעור
@@ -229,7 +230,9 @@ function bestDraw(roster, k, ledger, tries = 160) {
 
 const EMPTY = { plays: {}, pairs: {}, lessons: 0 };
 
-/* ייצוא/ייבוא הפנקס כטקסט קצר, כדי לשמור אותו איפה שנוח */
+/* ייצוא/ייבוא הפנקס כטקסט קצר, כדי לשמור אותו איפה שנוח.
+   גרסה 2 נושאת את המזהים עצמם ולא רק מספרים לפי סדר, ולכן הגיבוי שורד
+   הוספה או הסרה של תלמידים מהרשימה. גרסה 1 הייתה לפי מיקום בלבד. */
 function encodeLedger(cls, ledger) {
   const ids = ROSTERS[cls].map((s) => s.id);
   const p = ids.map((id) => ledger.plays[id] || 0);
@@ -240,15 +243,23 @@ function encodeLedger(cls, ledger) {
     })
     .filter(Boolean)
     .join(",");
-  return JSON.stringify({ v: 1, c: cls, l: ledger.lessons, p, x });
+  return JSON.stringify({ v: 2, c: cls, l: ledger.lessons, s: ids, p, x });
 }
 
+/** מחזיר { ledger, dropped, added } — dropped/added כדי שנוכל להגיד למשתמש
+    מה קרה במקום לשנות לו את ההיסטוריה בשקט */
 function decodeLedger(cls, text) {
   const o = JSON.parse(text);
   if (o.c !== cls) throw new Error("הפנקס שייך לכיתה " + o.c);
-  const ids = ROSTERS[cls].map((s) => s.id);
+  const list = ROSTERS[cls];
+  const known = new Set(list.map((s) => s.id));
+  // גיבוי ישן (v1) לא נשא מזהים — נקרא לפי סדר הרשימה הנוכחית, כמו קודם
+  const src = Array.isArray(o.s) ? o.s : list.map((s) => s.id);
+  const ids = src.map((id) => (known.has(id) ? id : null));
   const plays = {};
-  (o.p || []).forEach((n, i) => (plays[ids[i]] = n));
+  (o.p || []).forEach((n, i) => {
+    if (ids[i]) plays[ids[i]] = Number(n) || 0;
+  });
   const pairs = {};
   (o.x || "")
     .split(",")
@@ -258,12 +269,18 @@ function decodeLedger(cls, text) {
       const [a, b] = ij.split("-").map(Number);
       if (ids[a] && ids[b]) pairs[pairKey(ids[a], ids[b])] = Number(n);
     });
-  return { plays, pairs, lessons: o.l || 0 };
+  return {
+    ledger: { plays, pairs, lessons: o.l || 0 },
+    dropped: ids.filter((id) => !id).length,
+    added: list.filter((s) => !(s.id in plays)).length,
+  };
 }
 
 /* המרה בין הפנקס לשורות הגיליון:
    A1: "שיעורים" | מספר | "צירופים" | מחרוזת דחוסה
-   A2: כותרות, ומשורה 3: שם תלמיד | כמה הרכבים */
+   A2: כותרות, ומשורה 3: שם תלמיד | כמה הרכבים | מזהה
+   הצירופים דחוסים לפי מיקום השורה, ועמודת המזהה היא שמפרשת את המיקומים —
+   בלעדיה הוספת תלמיד באמצע הרשימה הייתה מזיזה לכולם את ההיסטוריה. */
 function ledgerToRows(cls, ledger) {
   const list = ROSTERS[cls];
   const ids = list.map((s) => s.id);
@@ -276,20 +293,25 @@ function ledgerToRows(cls, ledger) {
     .join(",");
   return [
     ["שיעורים", ledger.lessons, "צירופים", pairs],
-    ["תלמיד", "הרכבים", "", ""],
-    ...list.map((s) => [s.name, ledger.plays[s.id] || 0, "", ""]),
+    ["תלמיד", "הרכבים", "מזהה", ""],
+    ...list.map((s) => [s.name, ledger.plays[s.id] || 0, s.id, ""]),
   ];
 }
 
 function rowsToLedger(cls, rows) {
   if (!rows.length) return { plays: {}, pairs: {}, lessons: 0 };
   const list = ROSTERS[cls];
-  const ids = list.map((s) => s.id);
+  const known = new Set(list.map((s) => s.id));
   const byName = Object.fromEntries(list.map((s) => [s.name, s.id]));
   const lessons = Number(rows[0] && rows[0][1]) || 0;
   const plays = {};
+  // סדר השורות בגיליון הוא הבסיס לאינדקסים של הצירופים, ולכן נבנה ממנו
+  const order = [];
   rows.slice(2).forEach((r) => {
-    const id = byName[(r[0] || "").trim()];
+    const marked = (r[2] || "").trim();
+    // גיליון שנכתב לפני עמודת המזהה — נופלים חזרה לזיהוי לפי שם
+    const id = known.has(marked) ? marked : byName[(r[0] || "").trim()] || null;
+    order.push(id);
     if (id) plays[id] = Number(r[1]) || 0;
   });
   const pairs = {};
@@ -299,26 +321,76 @@ function rowsToLedger(cls, rows) {
     .forEach((part) => {
       const [ij, n] = part.split(":");
       const [a, b] = ij.split("-").map(Number);
-      if (ids[a] && ids[b]) pairs[pairKey(ids[a], ids[b])] = Number(n);
+      if (order[a] && order[b]) pairs[pairKey(order[a], order[b])] = Number(n);
     });
   return { plays, pairs, lessons };
 }
 
+const MAX_GROUP = 6; // מעבר לזה ההרכב כבר לא באמת מנגן
+
+/**
+ * כמה הרכבים אפשר להרכיב, וכמה מומלץ.
+ * לכל k דוגמים כמה חלוקות ולא אחת — חלוקה בודדת עלולה לצאת גרועה במקרה
+ * ולהפיל את ההמלצה. ואם אף k לא עומד בכל התנאים בוחרים את הטוב שנמצא
+ * (הכי מעט יושבים, ואז ההרכב הגדול הקטן ביותר) במקום ליפול ל-1.
+ */
 function capacity(roster) {
   const hardMax = Math.max(1, Math.floor(roster.length / 4));
   let max = hardMax;
   while (max > 1 && !attempt(roster, max, EMPTY, 25).length) max--;
-  let rec = 1;
+
+  const better = (a, b) => !b || a.bench < b.bench || (a.bench === b.bench && a.biggest < b.biggest);
+  let rec = null;
+  let fallback = null;
   for (let k = max; k >= 1; k--) {
-    const r = bestDraw(roster, k, EMPTY, 20);
-    if (r && Math.max(...r.groups.map((g) => g.length)) <= 6 && !r.bench.length) {
+    let best = null;
+    for (const r of attempt(roster, k, EMPTY, 40)) {
+      const cand = { k, bench: r.bench.length, biggest: Math.max(...r.groups.map((g) => g.length)) };
+      if (better(cand, best)) best = cand;
+    }
+    if (!best) continue;
+    if (better(best, fallback)) fallback = best;
+    if (!best.bench && best.biggest <= MAX_GROUP) {
       rec = k;
       break;
     }
-    rec = Math.min(max, Math.max(rec, 1));
   }
-  return { max, rec: rec || max };
+  return { max, rec: rec ?? (fallback ? fallback.k : max) };
 }
+
+const ROLE_LABEL = { drums: "מתופפים", bass: "בסיסטים", harmony: "כלים הרמוניים" };
+
+/* מה חוסם את מספר ההרכבים. כל הרכב צריך תופים, בס וכלי הרמוני, ותלמיד
+   מכסה לכל היותר MAX_LOAD הרכבים — כך שהתפקיד הנדיר קובע את התקרה.
+   בלי ההסבר הזה ירידה פתאומית מ-5 הרכבים ל-2 אחרי סימון נעדרים נראית כמו תקלה. */
+function bottleneck(pool) {
+  let limit = Infinity;
+  let role = null;
+  for (const r of ["drums", "bass", "harmony"]) {
+    const n = pool.filter((s) => s.roles.includes(r)).length;
+    if (n * MAX_LOAD < limit) (limit = n * MAX_LOAD), (role = r);
+  }
+  return { limit, role, count: limit / MAX_LOAD };
+}
+
+/* ============================ נוכחות ============================ */
+
+/* מי לא הגיע היום. נשמר ליום אחד בלבד: היעדרות שנגררת בשקט לשיעור הבא
+   מסוכנת יותר מהטרחה לסמן מחדש. */
+const ABSENT_KEY = (cls) => `ens-absent-${TABS[cls]}`;
+const todayStamp = () => new Date().toISOString().slice(0, 10);
+
+function loadAbsent(cls) {
+  try {
+    const r = store.get(ABSENT_KEY(cls));
+    if (!r) return [];
+    const o = JSON.parse(r.value);
+    return o.d === todayStamp() && Array.isArray(o.ids) ? o.ids : [];
+  } catch {
+    return [];
+  }
+}
+const saveAbsent = (cls, ids) => store.set(ABSENT_KEY(cls), JSON.stringify({ d: todayStamp(), ids }));
 
 /* ============================ עיצוב ============================ */
 
@@ -362,16 +434,23 @@ function Chip({ m, twice }) {
 }
 
 export default function App() {
-  const [cls, setCls] = useState("ט׳");
+  const [cls, setCls] = useState(CLASSES[0]);
   const roster = ROSTERS[cls];
   const [teacherOn, setTeacherOn] = useState(true);
-  const pool = useMemo(() => (teacherOn ? [...roster, TEACHER] : roster), [roster, teacherOn]);
-  const caps = useMemo(() => capacity(pool), [cls, teacherOn]);
-  const [k, setK] = useState(caps.rec);
+  const [absent, setAbsent] = useState(() => new Set(loadAbsent(CLASSES[0])));
+  const present = useMemo(() => roster.filter((s) => !absent.has(s.id)), [roster, absent]);
+  const pool = useMemo(() => (teacherOn ? [...present, TEACHER] : present), [present, teacherOn]);
+  const caps = useMemo(() => capacity(pool), [pool]);
+  const neck = useMemo(() => bottleneck(pool), [pool]);
+  // k נגזר ולא נשמר: כך הוא לא נשאר גדול מהאפשרי אחרי שסימנו נעדרים
+  const [kPick, setKPick] = useState(null); // null = ללכת אחרי ההמלצה
+  const k = kPick === null ? caps.rec : Math.min(kPick, caps.max);
   const [ledger, setLedger] = useState(EMPTY);
   const [res, setRes] = useState(null);
   const [saved, setSaved] = useState(false);
   const [showLedger, setShowLedger] = useState(false);
+  const [showRoll, setShowRoll] = useState(false);
+  const [drawErr, setDrawErr] = useState("");
   const [transfer, setTransfer] = useState(null); // טקסט הפנקס לייצוא/ייבוא
   const [note, setNote] = useState("");
   const [gOn, setGOn] = useState(Sheets.connected());
@@ -381,9 +460,11 @@ export default function App() {
   ledgerRef.current = ledger;
 
   useEffect(() => {
-    setK(caps.rec);
+    setKPick(null);
+    setAbsent(new Set(loadAbsent(cls)));
     setRes(null);
     setSaved(false);
+    setDrawErr("");
     let alive = true;
     (async () => {
       let l = EMPTY;
@@ -394,12 +475,31 @@ export default function App() {
       if (alive) setLedger(l);
     })();
     return () => (alive = false);
-  }, [cls, caps.rec]);
+  }, [cls]);
 
   useEffect(() => {
     setRes(null);
     setSaved(false);
+    setDrawErr("");
   }, [teacherOn]);
+
+  const toggleAbsent = (id) => {
+    const next = new Set(absent);
+    next.has(id) ? next.delete(id) : next.add(id);
+    setAbsent(next);
+    saveAbsent(cls, [...next]);
+    setRes(null);
+    setSaved(false);
+    setDrawErr("");
+  };
+
+  const clearAbsent = () => {
+    setAbsent(new Set());
+    saveAbsent(cls, []);
+    setRes(null);
+    setSaved(false);
+    setDrawErr("");
+  };
 
   // משיכה מהגיליון: מקור האמת. localStorage נשאר כמטמון לשיעור בלי רשת.
   const pull = useCallback(
@@ -447,8 +547,14 @@ export default function App() {
   };
 
   const draw = useCallback(() => {
-    setRes(bestDraw(pool, k, ledger));
+    const r = bestDraw(pool, k, ledger);
+    setRes(r);
     setSaved(false);
+    setDrawErr(
+      r
+        ? ""
+        : `אי אפשר להרכיב ${k} הרכבים מ-${pool.length} הנוכחים — בכל הרכב חייבים תופים, בס וכלי הרמוני. נסה פחות הרכבים, או בדוק את הנוכחות.`
+    );
   }, [pool, k, ledger]);
 
   const save = async () => {
@@ -517,7 +623,9 @@ export default function App() {
         .sort((a, b) => a.n - b.n || a.name.localeCompare(b.name, "he")),
     [roster, ledger]
   );
-  const avg = ledger.lessons ? (Object.values(ledger.plays).reduce((a, b) => a + b, 0) / roster.length).toFixed(1) : 0;
+  const avg = ledger.lessons
+    ? (roster.reduce((a, s) => a + (ledger.plays[s.id] || 0), 0) / roster.length).toFixed(1)
+    : 0;
 
   return (
     <div dir="rtl" style={{ background: C.bg, minHeight: "100vh", padding: "22px 16px 48px", fontFamily: "'Heebo', system-ui, sans-serif", color: C.ink }}>
@@ -543,7 +651,7 @@ export default function App() {
             הרכבים
             <select
               value={k}
-              onChange={(e) => setK(Number(e.target.value))}
+              onChange={(e) => setKPick(Number(e.target.value))}
               style={{ background: C.soft, color: C.ink, border: `1px solid ${C.line}`, borderRadius: 8, padding: "9px 10px", fontSize: 16, fontFamily: "inherit" }}
             >
               {Array.from({ length: caps.max }, (_, i) => i + 1).map((n) => (
@@ -564,6 +672,17 @@ export default function App() {
           >
             {teacherOn ? "✓ " : ""}תומר בהרכבים
           </button>
+          <button
+            onClick={() => setShowRoll(!showRoll)}
+            aria-expanded={showRoll}
+            style={{
+              ...btn("transparent", absent.size ? C.rose : C.dim),
+              border: `1px solid ${absent.size ? C.rose + "88" : C.line}`,
+            }}
+            title="סמן מי לא הגיע היום. נעדר לא נכנס להגרלה ולא צובר הרכבים בפנקס"
+          >
+            נוכחות {present.length}/{roster.length}
+          </button>
           <button onClick={draw} style={{ ...btn(C.teal, "#0C2320"), marginRight: "auto" }}>
             חלק מחדש
           </button>
@@ -583,6 +702,12 @@ export default function App() {
           </button>
           <span style={{ color: C.dim, fontSize: 13 }}>{gMsg || (gOn ? "" : "בלי חיבור, הפנקס נשמר רק במכשיר הזה")}</span>
         </div>
+        {absent.size > 0 && (
+          <p style={{ color: C.dim, fontSize: 13, margin: "10px 0 0", lineHeight: 1.6 }}>
+            עם {present.length} הנוכחים אפשר עד {caps.max} הרכבים
+            {neck.limit <= caps.max ? ` — ${ROLE_LABEL[neck.role]} נוכחים: ${neck.count}` : ""}.
+          </p>
+        )}
         <p style={{ color: C.dim, fontSize: 14, margin: "12px 0 0", lineHeight: 1.6 }}>
           {ledger.lessons
             ? `${ledger.lessons} שיעורים בפנקס · ממוצע ${avg} הרכבים לתלמיד. החלוקה מעדיפה את מי שצבר פחות.`
@@ -590,10 +715,66 @@ export default function App() {
         </p>
       </div>
 
+      {showRoll && (
+        <section style={{ maxWidth: 760, margin: "0 auto 16px", background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14, padding: 16 }}>
+          <div style={{ color: C.dim, fontSize: 14, marginBottom: 12, lineHeight: 1.6 }}>
+            לחץ על מי שלא הגיע. נעדר לא נכנס להגרלה וגם לא צובר הרכבים בפנקס — ולכן תהיה לו עדיפות בשיעור הבא.
+            הסימון נמחק מעצמו בסוף היום.
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            {roster.map((s) => {
+              const out = absent.has(s.id);
+              return (
+                <button
+                  key={s.id}
+                  onClick={() => toggleAbsent(s.id)}
+                  aria-pressed={out}
+                  style={{
+                    display: "flex",
+                    alignItems: "baseline",
+                    gap: 6,
+                    padding: "7px 12px",
+                    borderRadius: 999,
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                    fontSize: 15,
+                    background: out ? "transparent" : "rgba(255,255,255,0.06)",
+                    border: `1px solid ${out ? C.line : C.teal + "66"}`,
+                    color: out ? C.dim : C.ink,
+                    textDecoration: out ? "line-through" : "none",
+                  }}
+                >
+                  {s.name}
+                  <span style={{ color: out ? C.dim : TINT[s.instruments[0]] || C.dim, fontSize: 13 }}>
+                    {s.instruments[0]}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          {absent.size > 0 && (
+            <button
+              onClick={clearAbsent}
+              style={{ ...btn("transparent", C.dim), border: `1px solid ${C.line}`, marginTop: 12, padding: "8px 14px", fontSize: 14 }}
+            >
+              כולם נוכחים
+            </button>
+          )}
+        </section>
+      )}
+
       <main style={{ maxWidth: 760, margin: "0 auto" }}>
-        {!res && (
+        {!res && drawErr && (
+          <div style={{ border: `1px solid ${C.rose}66`, borderRadius: 14, padding: "24px 20px", textAlign: "center", color: C.rose, lineHeight: 1.6 }}>
+            {drawErr}
+          </div>
+        )}
+
+        {!res && !drawErr && (
           <div style={{ border: `1px dashed ${C.line}`, borderRadius: 14, padding: "44px 20px", textAlign: "center", color: C.dim }}>
-            {roster.length} תלמידים בכיתה {cls}. לחץ ״חלק מחדש״.
+            {absent.size
+              ? `${present.length} נוכחים מתוך ${roster.length} בכיתה ${cls}. לחץ ״חלק מחדש״.`
+              : `${roster.length} תלמידים בכיתה ${cls}. לחץ ״חלק מחדש״.`}
           </div>
         )}
 
@@ -691,11 +872,16 @@ export default function App() {
               <button
                 onClick={async () => {
                   try {
-                    const next = decodeLedger(cls, transfer.trim());
+                    const { ledger: next, dropped, added } = decodeLedger(cls, transfer.trim());
                     setLedger(next);
                     setRes(null);
                     setSaved(false);
-                    setNote(`נטען: ${next.lessons} שיעורים`);
+                    setDrawErr("");
+                    const extra = [
+                      dropped ? `${dropped} מהגיבוי כבר לא ברשימה` : "",
+                      added ? `${added} תלמידים חדשים מתחילים מאפס` : "",
+                    ].filter(Boolean);
+                    setNote(`נטען: ${next.lessons} שיעורים` + (extra.length ? " · " + extra.join(" · ") : ""));
                     try {
                       store.set(KEYS[cls], JSON.stringify(next));
                     } catch {}
