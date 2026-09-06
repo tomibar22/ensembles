@@ -222,6 +222,28 @@ function bestDraw(roster, k, ledger, tries = 160) {
 
 const EMPTY = { plays: {}, pairs: {}, lessons: 0 };
 
+/**
+ * מוסיף חלוקה אחת לפנקס, תמיד מעל `base` — מצב הפנקס שלפני השיעור הזה.
+ * זה מה שמאפשר לשמור שוב את אותו שיעור אחרי תיקון נוכחות: השמירה
+ * השנייה מחליפה את הראשונה במקום להיספר כשיעור נוסף.
+ * המורה לא נספר בפנקס — הוא ממלא כיסא, לא מתחרה על זמן ניגון.
+ */
+function applyLesson(roster, res, base) {
+  const plays = { ...base.plays };
+  const pairs = { ...base.pairs };
+  roster.forEach((s) => (plays[s.id] = (plays[s.id] || 0) + (res.load[s.id] || 0)));
+  res.groups.forEach((g) =>
+    g.forEach((a, i) =>
+      g.slice(i + 1).forEach((b) => {
+        if (a.teacher || b.teacher) return;
+        const key = pairKey(a.id, b.id);
+        pairs[key] = (pairs[key] || 0) + 1;
+      })
+    )
+  );
+  return { plays, pairs, lessons: base.lessons + 1 };
+}
+
 /* ייצוא/ייבוא הפנקס כטקסט קצר, כדי לשמור אותו איפה שנוח.
    גרסה 2 נושאת את המזהים עצמם ולא רק מספרים לפי סדר, ולכן הגיבוי שורד
    הוספה או הסרה של תלמידים מהרשימה. גרסה 1 הייתה לפי מיקום בלבד. */
@@ -378,6 +400,7 @@ export {
   ROLE_LABEL,
   ORDER,
   EMPTY,
+  applyLesson,
   buildRoster,
   pairKey,
   makeGroups,

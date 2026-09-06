@@ -7,6 +7,7 @@ import {
   MAX_LOAD,
   MAX_GROUP,
   EMPTY,
+  applyLesson,
   buildRoster,
   pairKey,
   attempt,
@@ -92,6 +93,47 @@ test("הפנקס מזיז עדיפות: מי שצבר הרבה יושב לפני
     r.bench.forEach((s) => (heavy.has(s.id) ? heavyBench++ : lightBench++));
   }
   assert.ok(heavyBench > lightBench * 2, `עמוסים ${heavyBench} מול מקופחים ${lightBench}`);
+});
+
+/* ============================ שמירה בפנקס ============================ */
+
+test("שמירת שיעור מוסיפה שיעור אחד ומעדכנת רק את מי שניגן", () => {
+  const roster = ROSTERS["ט׳"];
+  const r = bestDraw([...roster, TEACHER], 3, EMPTY);
+  const next = applyLesson(roster, r, EMPTY);
+  assert.equal(next.lessons, 1);
+  const played = new Set(Object.keys(r.load));
+  roster.forEach((s) => {
+    const n = next.plays[s.id] || 0;
+    if (played.has(s.id)) assert.equal(n, r.load[s.id]);
+    else assert.equal(n, 0, `${s.name} צבר בלי לנגן`);
+  });
+  assert.ok(!("__teacher" in next.plays), "המורה נספר בפנקס");
+});
+
+test("שמירה חוזרת מעל אותו בסיס מחליפה ולא נספרת פעמיים (רגרסיה)", () => {
+  // תיקון נוכחות אחרי שמירה, חלוקה מחדש ושמירה שוב — שיעור אחד, לא שניים
+  const roster = ROSTERS["ט׳"];
+  const base = { plays: {}, pairs: {}, lessons: 4 };
+  const first = applyLesson(roster, bestDraw([...roster, TEACHER], 3, base), base);
+  assert.equal(first.lessons, 5);
+
+  const absent = new Set([roster[0].id]);
+  const redraw = bestDraw([...roster.filter((s) => !absent.has(s.id)), TEACHER], 3, base);
+  const second = applyLesson(roster, redraw, base); // מעל אותו בסיס, לא מעל התוצאה
+  assert.equal(second.lessons, 5, "השמירה השנייה נספרה כשיעור נוסף");
+
+  const total = roster.reduce((a, s) => a + (second.plays[s.id] || 0), 0);
+  assert.ok(total <= roster.length * 2, "הצבירה הוכפלה");
+  assert.equal(second.plays[roster[0].id] || 0, 0, "מי שסומן נעדר צבר בכל זאת");
+});
+
+test("applyLesson לא משנה את הבסיס, כדי שאפשר יהיה לבטל שמירה", () => {
+  const roster = ROSTERS["ט׳"];
+  const base = { plays: { [roster[1].id]: 3 }, pairs: { [pairKey(roster[0].id, roster[1].id)]: 2 }, lessons: 4 };
+  const snapshot = JSON.parse(JSON.stringify(base));
+  applyLesson(roster, bestDraw([...roster, TEACHER], 3, base), base);
+  assert.deepEqual(base, snapshot, "הבסיס שונה במקום להיות מועתק");
 });
 
 /* ============================ capacity ============================ */

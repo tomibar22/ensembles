@@ -8,6 +8,7 @@ import {
   ROSTERS,
   ROLE_LABEL,
   EMPTY,
+  applyLesson,
   pairKey,
   bestDraw,
   capacity,
@@ -128,6 +129,8 @@ export default function App() {
   const rollOpen = !res || showRoll;
   const [drawErr, setDrawErr] = useState("");
   const [showHelp, setShowHelp] = useState(false);
+  // הפנקס כפי שהיה לפני שהשיעור הזה נשמר — הבסיס לשמירה חוזרת ולביטול
+  const [lessonBase, setLessonBase] = useState(null);
   const [transfer, setTransfer] = useState(null); // טקסט הפנקס לייצוא/ייבוא
   const [note, setNote] = useState("");
   const [gOn, setGOn] = useState(Sheets.connected());
@@ -140,6 +143,7 @@ export default function App() {
 
   useEffect(() => {
     setKPick(null);
+    setLessonBase(null);
     setAbsent(new Set(loadAbsent(cls)));
     setRes(null);
     setSaved(false);
@@ -196,6 +200,7 @@ export default function App() {
         }
         const next = rowsToLedger(cls, rows);
         setLedger(next);
+        setLessonBase(null);
         store.set(KEYS[cls], JSON.stringify(next));
         setGMsg(`מסונכרן · ${next.lessons} שיעורים בגיליון`);
       } catch (e) {
@@ -239,20 +244,11 @@ export default function App() {
 
   const save = async () => {
     if (!res) return;
-    const plays = { ...ledger.plays };
-    const pairs = { ...ledger.pairs };
-    roster.forEach((s) => (plays[s.id] = (plays[s.id] || 0) + (res.load[s.id] || 0)));
-    // המורה לא נספר בפנקס — הוא ממלא כיסא, לא מתחרה על זמן ניגון
-    res.groups.forEach((g) =>
-      g.forEach((a, i) =>
-        g.slice(i + 1).forEach((b) => {
-          if (a.teacher || b.teacher) return;
-          const key = pairKey(a.id, b.id);
-          pairs[key] = (pairs[key] || 0) + 1;
-        })
-      )
-    );
-    const next = { plays, pairs, lessons: ledger.lessons + 1 };
+    // תמיד בונים מעל המצב שלפני השיעור הזה. אחרת תיקון נוכחות אחרי שמירה,
+    // חלוקה מחדש ושמירה נוספת היו סופרים שיעור אחד כשניים.
+    const base = lessonBase || ledger;
+    const next = applyLesson(roster, res, base);
+    setLessonBase(base);
     setLedger(next);
     setSaved(true);
     store.set(KEYS[cls], JSON.stringify(next));
@@ -270,8 +266,28 @@ export default function App() {
     }
   };
 
+  const undoSave = async () => {
+    if (!lessonBase) return;
+    const back = lessonBase;
+    setLedger(back);
+    setLessonBase(null);
+    setSaved(false);
+    store.set(KEYS[cls], JSON.stringify(back));
+    if (Sheets.connected()) {
+      try {
+        await Sheets.writeRows(TABS[cls], ledgerToRows(cls, back));
+        setGMsg(`השמירה בוטלה · ${back.lessons} שיעורים`);
+      } catch (e) {
+        setGMsg("בוטל במכשיר אבל לא בגיליון — " + e.message);
+      }
+    } else {
+      setGMsg(`השמירה בוטלה · ${back.lessons} שיעורים`);
+    }
+  };
+
   const reset = async () => {
     setLedger(EMPTY);
+    setLessonBase(null);
     setSaved(false);
     store.set(KEYS[cls], JSON.stringify(EMPTY));
     if (Sheets.connected()) {
@@ -546,8 +562,21 @@ export default function App() {
         {res && (
           <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginTop: 14 }}>
             <button onClick={save} disabled={saved} style={btn(saved ? C.soft : C.brass, saved ? C.dim : "#241B08")}>
-              {saved ? "נשמר בפנקס" : "שמור את השיעור בפנקס"}
+              {saved
+                ? "נשמר בפנקס"
+                : lessonBase
+                  ? "עדכן את השיעור בפנקס"
+                  : "שמור את השיעור בפנקס"}
             </button>
+            {lessonBase && (
+              <button
+                onClick={undoSave}
+                style={{ ...btn("transparent", C.dim), border: `1px solid ${C.line}` }}
+                title="מחזיר את הפנקס בדיוק למצב שלפני השיעור הזה"
+              >
+                בטל שמירה
+              </button>
+            )}
             <button onClick={() => setShowLedger(!showLedger)} style={{ ...btn("transparent", C.dim), border: `1px solid ${C.line}` }}>
               {showLedger ? "הסתר פנקס" : "הצג פנקס"}
             </button>
@@ -611,6 +640,7 @@ export default function App() {
                   try {
                     const { ledger: next, dropped, added } = decodeLedger(cls, transfer.trim());
                     setLedger(next);
+                    setLessonBase(null);
                     setRes(null);
                     setSaved(false);
                     setDrawErr("");
