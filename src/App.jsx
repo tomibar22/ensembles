@@ -75,9 +75,10 @@ function Chip({ m, twice }) {
     <div
       style={{
         display: "flex",
-        alignItems: "baseline",
+        alignItems: "center",
         gap: 8,
-        padding: "7px 12px",
+        minHeight: 40,
+        padding: "0 13px",
         borderRadius: 999,
         background: m.slot !== "melody" ? "rgba(255,255,255,0.06)" : "transparent",
         border: `1px ${m.teacher ? "dashed" : "solid"} ${m.slot !== "melody" ? tint + "66" : C.line}`,
@@ -85,9 +86,20 @@ function Chip({ m, twice }) {
     >
       <span style={{ fontSize: 16, fontWeight: 500 }}>{m.name}</span>
       {m.teacher && <span style={{ color: C.teal, fontSize: 12 }}>מורה</span>}
-      <span style={{ color: tint, fontSize: 13 }}>{m.playing}</span>
+      <span style={{ color: tint, fontSize: 14 }}>{m.playing}</span>
       {twice && (
-        <span style={{ color: C.brass, fontSize: 12, fontWeight: 700 }} title="מנגן בשני הרכבים היום">
+        <span
+          title="מנגן בשני הרכבים היום"
+          style={{
+            background: C.brass + "26",
+            color: C.brass,
+            fontSize: 11,
+            fontWeight: 700,
+            borderRadius: 5,
+            padding: "2px 5px",
+            alignSelf: "center",
+          }}
+        >
           ×2
         </span>
       )}
@@ -115,6 +127,7 @@ export default function App() {
   // הנוכחות פתוחה כל עוד אין חלוקה על המסך; אחריה היא מתקפלת לשורת סיכום
   const rollOpen = !res || showRoll;
   const [drawErr, setDrawErr] = useState("");
+  const [showHelp, setShowHelp] = useState(false);
   const [transfer, setTransfer] = useState(null); // טקסט הפנקס לייצוא/ייבוא
   const [note, setNote] = useState("");
   const [gOn, setGOn] = useState(Sheets.connected());
@@ -296,30 +309,32 @@ export default function App() {
 
   return (
     <div dir="rtl" style={{ background: C.bg, minHeight: "100vh", padding: "22px 16px 48px", fontFamily: "'Heebo', system-ui, sans-serif", color: C.ink }}>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;700&family=Frank+Ruhl+Libre:wght@500;700&display=swap');`}</style>
-
-      <header style={{ maxWidth: 760, margin: "0 auto 18px" }}>
-        <h1 style={{ fontFamily: "'Frank Ruhl Libre', serif", fontSize: 34, margin: 0 }}>חלוקת הרכבים</h1>
-        <p style={{ color: C.dim, margin: "6px 0 0", fontSize: 15, lineHeight: 1.6 }}>
-          תופים, בס וכלי הרמוני בכל הרכב. מי שנדרש פעמיים מסומן ×2, והפנקס דואג שזה יתחלף בין השיעורים. תומר נכנס להרכב אחד ואינו נספר בפנקס.
-        </p>
+      {/* הכותרת וההגדרות נדחסו לשורות בודדות: במסך טלפון הן תפסו 500px
+          לפני שהתוכן התחיל, וכפתור החלוקה נפל מתחת לקיפול. */}
+      <header style={{ maxWidth: 760, margin: "0 auto 12px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+        <h1 style={{ fontFamily: "'Frank Ruhl Libre', serif", fontSize: 26, margin: 0 }}>חלוקת הרכבים</h1>
+        <div style={{ display: "flex", gap: 6 }}>
+          {CLASSES.map((c) => (
+            <button
+              key={c}
+              onClick={() => setCls(c)}
+              aria-pressed={cls === c}
+              style={{ ...btn(cls === c ? C.brass : C.soft, cls === c ? "#241B08" : C.ink), padding: "9px 16px", fontSize: 15 }}
+            >
+              {c}
+            </button>
+          ))}
+        </div>
       </header>
 
-      <div style={{ maxWidth: 760, margin: "0 auto 16px", background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14, padding: 16 }}>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center" }}>
-          <div style={{ display: "flex", gap: 6 }}>
-            {CLASSES.map((c) => (
-              <button key={c} onClick={() => setCls(c)} style={btn(cls === c ? C.brass : C.soft, cls === c ? "#241B08" : C.ink)}>
-                כיתה {c}
-              </button>
-            ))}
-          </div>
-          <label style={{ display: "flex", alignItems: "center", gap: 8, color: C.dim, fontSize: 15 }}>
+      <div style={{ maxWidth: 760, margin: "0 auto 12px", background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14, padding: "12px 14px" }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 7, color: C.dim, fontSize: 14 }}>
             הרכבים
             <select
               value={k}
               onChange={(e) => setKPick(Number(e.target.value))}
-              style={{ background: C.soft, color: C.ink, border: `1px solid ${C.line}`, borderRadius: 8, padding: "9px 10px", fontSize: 16, fontFamily: "inherit" }}
+              style={{ background: C.soft, color: C.ink, border: `1px solid ${C.line}`, borderRadius: 8, padding: "8px 9px", fontSize: 16, fontFamily: "inherit" }}
             >
               {Array.from({ length: caps.max }, (_, i) => i + 1).map((n) => (
                 <option key={n} value={n}>
@@ -331,35 +346,54 @@ export default function App() {
           </label>
           <button
             onClick={() => setTeacherOn(!teacherOn)}
+            aria-pressed={teacherOn}
             style={{
               ...btn(teacherOn ? C.soft : "transparent", teacherOn ? C.ink : C.dim),
               border: `1px solid ${teacherOn ? C.teal + "88" : C.line}`,
+              padding: "8px 12px",
+              fontSize: 14,
             }}
             title="תומר תופס כיסא פסנתר בהרכב אחד, ומחליף תלמיד שהיה צריך לנגן פעמיים"
           >
-            {teacherOn ? "✓ " : ""}תומר בהרכבים
+            {teacherOn ? "✓ " : ""}תומר
           </button>
-        </div>
-        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginTop: 12 }}>
           <button
             onClick={gOn ? () => pull(false) : connect}
             disabled={gBusy}
             style={{
-              ...btn("transparent", gOn ? C.teal : C.ink),
+              ...btn("transparent", gOn ? C.teal : C.dim),
               border: `1px solid ${gOn ? C.teal + "88" : C.line}`,
-              padding: "8px 14px",
+              padding: "8px 12px",
               fontSize: 14,
             }}
+            title={gOn ? "מסונכרן עם הגיליון. לחיצה מרעננת" : "בלי חיבור, הפנקס נשמר רק במכשיר הזה"}
           >
-            {gBusy ? "מסנכרן…" : gOn ? "רענן מהגיליון" : "התחבר לגיליון"}
+            {gBusy ? "מסנכרן…" : gOn ? "● גיליון" : "○ גיליון"}
           </button>
-          <span style={{ color: C.dim, fontSize: 13 }}>{gMsg || (gOn ? "" : "בלי חיבור, הפנקס נשמר רק במכשיר הזה")}</span>
+          <button
+            onClick={() => setShowHelp(!showHelp)}
+            aria-expanded={showHelp}
+            style={{ ...btn("transparent", C.dim), border: `1px solid ${C.line}`, padding: "8px 12px", fontSize: 14, marginRight: "auto" }}
+          >
+            איך זה עובד?
+          </button>
         </div>
-        <p style={{ color: C.dim, fontSize: 14, margin: "12px 0 0", lineHeight: 1.6 }}>
-          {ledger.lessons
-            ? `${ledger.lessons} שיעורים בפנקס · ממוצע ${avg} הרכבים לתלמיד. החלוקה מעדיפה את מי שצבר פחות.`
-            : "עדיין אין שיעורים בפנקס. אחרי כל שיעור לחץ ״שמור״, וההגרלות הבאות יתקנו את מי שקופח."}
-        </p>
+
+        {(gMsg || ledger.lessons > 0) && (
+          <p style={{ color: C.dim, fontSize: 13, margin: "10px 0 0", lineHeight: 1.5 }}>
+            {gMsg && <span>{gMsg}</span>}
+            {gMsg && ledger.lessons > 0 && " · "}
+            {ledger.lessons > 0 && `${ledger.lessons} שיעורים בפנקס · ממוצע ${avg} הרכבים לתלמיד`}
+          </p>
+        )}
+
+        {showHelp && (
+          <div style={{ color: C.dim, fontSize: 14, margin: "12px 0 0", lineHeight: 1.7, borderTop: `1px solid ${C.line}`, paddingTop: 12 }}>
+            תופים, בס וכלי הרמוני בכל הרכב. מי שנדרש פעמיים מסומן ×2, והפנקס דואג שזה יתחלף בין
+            השיעורים. תומר נכנס להרכב אחד ואינו נספר בפנקס.
+            {!ledger.lessons && " אחרי כל שיעור לחץ ״שמור״, וההגרלות הבאות יתקנו את מי שקופח."}
+          </div>
+        )}
       </div>
 
       {/* הנוכחות היא השלב שלפני החלוקה, ולכן היא פתוחה כל עוד אין תוצאה
@@ -367,10 +401,14 @@ export default function App() {
       <section style={{ maxWidth: 760, margin: "0 auto 16px", background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14, padding: 16 }}>
         {rollOpen ? (
           <>
-            <h2 style={{ fontFamily: "'Frank Ruhl Libre', serif", fontSize: 20, margin: "0 0 6px" }}>מי כאן היום?</h2>
-            <div style={{ color: C.dim, fontSize: 14, marginBottom: 12, lineHeight: 1.6 }}>
-              לחץ על מי שלא הגיע. נעדר לא נכנס לחלוקה וגם לא צובר הרכבים בפנקס — ולכן תהיה לו עדיפות
-              בשיעור הבא. הסימון נמחק מעצמו בסוף היום.
+            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10, marginBottom: 4 }}>
+              <h2 style={{ fontFamily: "'Frank Ruhl Libre', serif", fontSize: 20, margin: 0 }}>מי כאן היום?</h2>
+              <span style={{ color: absent.size ? C.rose : C.dim, fontSize: 14 }}>
+                {absent.size ? `${present.length} מתוך ${roster.length}` : "כולם"}
+              </span>
+            </div>
+            <div style={{ color: C.dim, fontSize: 13, marginBottom: 12, lineHeight: 1.5 }}>
+              לחץ על מי שלא הגיע. נעדר לא נכנס לחלוקה ולא צובר הרכבים, ולכן תהיה לו עדיפות בשיעור הבא.
             </div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
               {roster.map((s) => {
@@ -384,15 +422,17 @@ export default function App() {
                       display: "flex",
                       alignItems: "baseline",
                       gap: 6,
-                      padding: "7px 12px",
+                      minHeight: 44, // מטרת מגע נוחה באצבע
+                      padding: "0 14px",
                       borderRadius: 999,
                       cursor: "pointer",
                       fontFamily: "inherit",
-                      fontSize: 15,
+                      fontSize: 16,
                       background: out ? "transparent" : "rgba(255,255,255,0.06)",
                       border: `1px solid ${out ? C.line : C.teal + "66"}`,
                       color: out ? C.dim : C.ink,
                       textDecoration: out ? "line-through" : "none",
+                      opacity: out ? 0.65 : 1,
                     }}
                   >
                     {s.name}
@@ -409,8 +449,20 @@ export default function App() {
                 {neck.limit <= caps.max ? ` — ${ROLE_LABEL[neck.role]} נוכחים: ${neck.count}` : ""}.
               </p>
             )}
-            <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginTop: 14 }}>
-              <button onClick={draw} style={btn(C.teal, "#0C2320")}>
+            {/* דביק: ברשימה של 22 שמות הכפתור נפל מתחת לקיפול במסך טלפון */}
+            <div
+              style={{
+                display: "flex",
+                gap: 10,
+                alignItems: "center",
+                flexWrap: "wrap",
+                marginTop: 14,
+                position: "sticky",
+                bottom: "max(10px, env(safe-area-inset-bottom))",
+                zIndex: 2,
+              }}
+            >
+              <button onClick={draw} style={{ ...btn(C.teal, "#0C2320"), minHeight: 48, boxShadow: "0 6px 20px rgba(0,0,0,0.45)" }}>
                 {res ? "חלק מחדש" : `חלק את ${present.length} הנוכחים ל-${k} הרכבים`}
               </button>
               {absent.size > 0 && (
@@ -421,17 +473,17 @@ export default function App() {
             </div>
           </>
         ) : (
-          <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
             <span style={{ fontSize: 15, color: absent.size ? C.rose : C.dim }}>
-              {absent.size ? `${present.length} מתוך ${roster.length} נוכחים` : "כל הכיתה נוכחת"}
+              {absent.size ? `${present.length}/${roster.length} נוכחים` : "כולם נוכחים"}
             </span>
             <button
               onClick={() => setShowRoll(true)}
-              style={{ ...btn("transparent", C.ink), border: `1px solid ${C.line}`, padding: "8px 14px", fontSize: 14 }}
+              style={{ ...btn("transparent", C.ink), border: `1px solid ${C.line}`, padding: "9px 13px", fontSize: 14 }}
             >
               שנה נוכחות
             </button>
-            <button onClick={draw} style={{ ...btn(C.teal, "#0C2320"), marginRight: "auto" }}>
+            <button onClick={draw} style={{ ...btn(C.teal, "#0C2320"), padding: "9px 15px", fontSize: 15, marginRight: "auto" }}>
               חלק מחדש
             </button>
           </div>
@@ -447,9 +499,27 @@ export default function App() {
 
         {res &&
           res.groups.map((g, i) => (
-            <section key={i} style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14, padding: 16, marginBottom: 12 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 12 }}>
-                <h2 style={{ fontFamily: "'Frank Ruhl Libre', serif", fontSize: 22, margin: 0, color: C.brass }}>הרכב {i + 1}</h2>
+            <section key={i} style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14, padding: 14, marginBottom: 10 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                <h2 style={{ display: "flex", alignItems: "center", gap: 9, fontFamily: "'Frank Ruhl Libre', serif", fontSize: 19, margin: 0 }}>
+                  הרכב
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      width: 28,
+                      height: 28,
+                      borderRadius: 999,
+                      background: C.brass,
+                      color: "#241B08",
+                      fontSize: 16,
+                      fontWeight: 700,
+                    }}
+                  >
+                    {i + 1}
+                  </span>
+                </h2>
                 <span style={{ color: C.dim, fontSize: 13 }}>{g.length} נגנים</span>
               </div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
@@ -568,7 +638,7 @@ export default function App() {
         {showLedger && (
           <section style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14, padding: 16, marginTop: 12 }}>
             <div style={{ color: C.dim, fontSize: 14, marginBottom: 10 }}>סה״כ הרכבים לתלמיד ב-{ledger.lessons} שיעורים · מלמעלה למטה, מהמקופח לעמוס</div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px 18px" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: "2px 18px" }}>
               {ledgerRows.map((s) => (
                 <div key={s.id} style={{ display: "flex", justifyContent: "space-between", borderBottom: `1px solid ${C.line}`, padding: "4px 0", fontSize: 15 }}>
                   <span>{s.name}</span>

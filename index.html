@@ -2,11 +2,22 @@
 <html lang="he" dir="rtl">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#161320" />
     <title>חלוקת הרכבים — שיעור אלתור</title>
+    <!-- הפונטים נטענים כאן ולא דרך @import בתוך style מוזרק: כך הם מתחילים
+         לרדת עם הדף ולא אחרי שה-JS רץ, ואין הבזק של טקסט בפונט ברירת מחדל -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;700&family=Frank+Ruhl+Libre:wght@500;700&display=swap"
+    />
     <style>
       html, body, #root { margin: 0; background: #161320; min-height: 100%; }
+      /* גלילה חלקה בתוך אזורים, ובלי הדגשת מגע כחולה בסמארטפון */
+      * { -webkit-tap-highlight-color: transparent; }
+      button { touch-action: manipulation; }
     </style>
   </head>
   <body>

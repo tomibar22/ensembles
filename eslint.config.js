@@ -9,7 +9,7 @@ import hooks from "eslint-plugin-react-hooks";
    כללי סגנון של הוקים נשארים warnings: הם שווים קריאה, אבל לא
    צריכים לעצור פרסום. */
 export default [
-  { ignores: ["dist/**", "node_modules/**"] },
+  { ignores: ["dist/**", "node_modules/**", "*.tmp.mjs"] },
   js.configs.recommended,
   {
     files: ["*.config.js"],
