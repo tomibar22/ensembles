@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import * as Sheets from "./sheets.js";
 
-/* הפנקס נשמר ב-localStorage של הדפדפן, וגם ניתן לגיבוי כטקסט */
+/* מטמון מקומי. מקור האמת הוא הגיליון, וזה מה שמאפשר לעבוד גם בלי רשת */
 const store = {
   get(k) {
     try {
@@ -67,6 +68,7 @@ const UNIQUE = new Set(["תופים", "בס", "פסנתר", "גיטרה"]);
 const ORDER = ["תופים", "בס", "פסנתר", "גיטרה", "חצוצרה", "טרומבון", "אלט", "טנור", "חליל", "שירה"];
 const orderOf = (i) => (ORDER.indexOf(i) === -1 ? 99 : ORDER.indexOf(i));
 const KEYS = { "ט׳": "ens-ledger-g9", "י״א": "ens-ledger-g11" };
+const TABS = { "ט׳": "g9", "י״א": "g11" }; // לשוניות בגיליון
 const MAX_LOAD = 2; // תלמיד לא ינגן ביותר משני הרכבים באותו שיעור
 const TEACHER = {
   id: "__teacher",
@@ -259,6 +261,49 @@ function decodeLedger(cls, text) {
   return { plays, pairs, lessons: o.l || 0 };
 }
 
+/* המרה בין הפנקס לשורות הגיליון:
+   A1: "שיעורים" | מספר | "צירופים" | מחרוזת דחוסה
+   A2: כותרות, ומשורה 3: שם תלמיד | כמה הרכבים */
+function ledgerToRows(cls, ledger) {
+  const list = ROSTERS[cls];
+  const ids = list.map((s) => s.id);
+  const pairs = Object.entries(ledger.pairs)
+    .map(([key, n]) => {
+      const [a, b] = key.split("|").map((id) => ids.indexOf(id));
+      return a < 0 || b < 0 ? null : `${a}-${b}:${n}`;
+    })
+    .filter(Boolean)
+    .join(",");
+  return [
+    ["שיעורים", ledger.lessons, "צירופים", pairs],
+    ["תלמיד", "הרכבים", "", ""],
+    ...list.map((s) => [s.name, ledger.plays[s.id] || 0, "", ""]),
+  ];
+}
+
+function rowsToLedger(cls, rows) {
+  if (!rows.length) return { plays: {}, pairs: {}, lessons: 0 };
+  const list = ROSTERS[cls];
+  const ids = list.map((s) => s.id);
+  const byName = Object.fromEntries(list.map((s) => [s.name, s.id]));
+  const lessons = Number(rows[0] && rows[0][1]) || 0;
+  const plays = {};
+  rows.slice(2).forEach((r) => {
+    const id = byName[(r[0] || "").trim()];
+    if (id) plays[id] = Number(r[1]) || 0;
+  });
+  const pairs = {};
+  ((rows[0] && rows[0][3]) || "")
+    .split(",")
+    .filter(Boolean)
+    .forEach((part) => {
+      const [ij, n] = part.split(":");
+      const [a, b] = ij.split("-").map(Number);
+      if (ids[a] && ids[b]) pairs[pairKey(ids[a], ids[b])] = Number(n);
+    });
+  return { plays, pairs, lessons };
+}
+
 function capacity(roster) {
   const hardMax = Math.max(1, Math.floor(roster.length / 4));
   let max = hardMax;
@@ -329,6 +374,11 @@ export default function App() {
   const [showLedger, setShowLedger] = useState(false);
   const [transfer, setTransfer] = useState(null); // טקסט הפנקס לייצוא/ייבוא
   const [note, setNote] = useState("");
+  const [gOn, setGOn] = useState(Sheets.connected());
+  const [gMsg, setGMsg] = useState("");
+  const [gBusy, setGBusy] = useState(false);
+  const ledgerRef = useRef(ledger);
+  ledgerRef.current = ledger;
 
   useEffect(() => {
     setK(caps.rec);
@@ -350,6 +400,51 @@ export default function App() {
     setRes(null);
     setSaved(false);
   }, [teacherOn]);
+
+  // משיכה מהגיליון: מקור האמת. localStorage נשאר כמטמון לשיעור בלי רשת.
+  const pull = useCallback(
+    async (silent) => {
+      if (!Sheets.connected()) return;
+      setGBusy(true);
+      try {
+        const rows = await Sheets.readRows(TABS[cls]);
+        const local = ledgerRef.current;
+        // לשונית ריקה בגיליון ופנקס מקומי קיים — מעלים את המקומי במקום למחוק אותו
+        if (!rows.length && local.lessons > 0) {
+          await Sheets.writeRows(TABS[cls], ledgerToRows(cls, local));
+          setGMsg(`הפנקס המקומי הועלה לגיליון · ${local.lessons} שיעורים`);
+          return;
+        }
+        const next = rowsToLedger(cls, rows);
+        setLedger(next);
+        store.set(KEYS[cls], JSON.stringify(next));
+        setGMsg(`מסונכרן · ${next.lessons} שיעורים בגיליון`);
+      } catch (e) {
+        setGOn(Sheets.connected());
+        if (!silent) setGMsg(e.message);
+      } finally {
+        setGBusy(false);
+      }
+    },
+    [cls]
+  );
+
+  useEffect(() => {
+    if (gOn) pull(true);
+  }, [cls, gOn, pull]);
+
+  const connect = async () => {
+    setGMsg("");
+    setGBusy(true);
+    try {
+      await Sheets.connect();
+      setGOn(true);
+    } catch (e) {
+      setGMsg(e.message);
+    } finally {
+      setGBusy(false);
+    }
+  };
 
   const draw = useCallback(() => {
     setRes(bestDraw(pool, k, ledger));
@@ -374,17 +469,33 @@ export default function App() {
     const next = { plays, pairs, lessons: ledger.lessons + 1 };
     setLedger(next);
     setSaved(true);
-    try {
-      store.set(KEYS[cls], JSON.stringify(next));
-    } catch {}
+    store.set(KEYS[cls], JSON.stringify(next));
+    if (Sheets.connected()) {
+      setGBusy(true);
+      try {
+        await Sheets.writeRows(TABS[cls], ledgerToRows(cls, next));
+        setGMsg(`נשמר בגיליון · ${next.lessons} שיעורים`);
+      } catch (e) {
+        setGOn(Sheets.connected());
+        setGMsg("נשמר במכשיר אבל לא בגיליון — " + e.message);
+      } finally {
+        setGBusy(false);
+      }
+    }
   };
 
   const reset = async () => {
     setLedger(EMPTY);
     setSaved(false);
-    try {
-      store.set(KEYS[cls], JSON.stringify(EMPTY));
-    } catch {}
+    store.set(KEYS[cls], JSON.stringify(EMPTY));
+    if (Sheets.connected()) {
+      try {
+        await Sheets.writeRows(TABS[cls], ledgerToRows(cls, EMPTY));
+        setGMsg("הפנקס אופס גם בגיליון");
+      } catch (e) {
+        setGMsg(e.message);
+      }
+    }
   };
 
   const btn = (bg, fg) => ({
@@ -456,6 +567,21 @@ export default function App() {
           <button onClick={draw} style={{ ...btn(C.teal, "#0C2320"), marginRight: "auto" }}>
             חלק מחדש
           </button>
+        </div>
+        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginTop: 12 }}>
+          <button
+            onClick={gOn ? () => pull(false) : connect}
+            disabled={gBusy}
+            style={{
+              ...btn("transparent", gOn ? C.teal : C.ink),
+              border: `1px solid ${gOn ? C.teal + "88" : C.line}`,
+              padding: "8px 14px",
+              fontSize: 14,
+            }}
+          >
+            {gBusy ? "מסנכרן…" : gOn ? "רענן מהגיליון" : "התחבר לגיליון"}
+          </button>
+          <span style={{ color: C.dim, fontSize: 13 }}>{gMsg || (gOn ? "" : "בלי חיבור, הפנקס נשמר רק במכשיר הזה")}</span>
         </div>
         <p style={{ color: C.dim, fontSize: 14, margin: "12px 0 0", lineHeight: 1.6 }}>
           {ledger.lessons
