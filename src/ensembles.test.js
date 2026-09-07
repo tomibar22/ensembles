@@ -332,10 +332,18 @@ const missingIn = (g) =>
 test("החלפה תקינה מזיזה בדיוק שני נגנים ולא נוגעת בשאר", () => {
   const roster = ROSTERS["י״א"];
   const r = bestDraw([...roster, TEACHER], 3, EMPTY);
-  const A = findIn(r, 0, (m) => m.slot === "melody" && !m.teacher);
-  const B = findIn(r, 1, (m) => m.slot === "melody" && !m.teacher);
-  const out = swapPlayers(r, { g: 0, id: A.id }, { g: 1, id: B.id });
-  assert.ok(!out.error, out.error);
+  // לא כל זוג ניתן להחלפה — גיטריסט מסומן melody אבל הכלי שלו ייחודי,
+  // ולכן ייתכן שאין לו כיסא ביעד. מחפשים זוג שההחלפה בו באמת מותרת.
+  let A, B, out;
+  for (const x of r.groups[0]) {
+    for (const y of r.groups[1]) {
+      const t = swapPlayers(r, { g: 0, id: x.id }, { g: 1, id: y.id });
+      if (!t.error) ((A = x), (B = y), (out = t));
+      if (out) break;
+    }
+    if (out) break;
+  }
+  assert.ok(out, "לא נמצאה אף החלפה מותרת בין שני ההרכבים");
 
   assert.ok(out.groups[0].some((m) => m.id === B.id), "B לא הגיע להרכב 1");
   assert.ok(out.groups[1].some((m) => m.id === A.id), "A לא הגיע להרכב 2");

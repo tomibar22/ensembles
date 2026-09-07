@@ -52,30 +52,54 @@ async function api(path, opts = {}) {
   return res.json();
 }
 
-/** יוצר את הלשונית אם אינה קיימת */
-export async function ensureTab(tab) {
-  const meta = await api("?fields=sheets.properties.title");
-  const titles = (meta.sheets || []).map((s) => s.properties.title);
-  if (titles.includes(tab)) return;
-  await api(":batchUpdate", {
+/** מזהה הלשונית המספרי, ויוצר אותה אם אינה קיימת */
+export async function tabId(tab) {
+  const meta = await api("?fields=sheets.properties(sheetId,title)");
+  const found = (meta.sheets || []).find((sh) => sh.properties.title === tab);
+  if (found) return found.properties.sheetId;
+  const r = await api(":batchUpdate", {
     method: "POST",
     body: JSON.stringify({ requests: [{ addSheet: { properties: { title: tab } } }] }),
   });
+  return r.replies[0].addSheet.properties.sheetId;
 }
 
 /** מחזיר מערך דו-ממדי של תאים, או [] אם הלשונית ריקה */
 export async function readRows(tab) {
-  await ensureTab(tab);
+  await tabId(tab);
   const r = await api(`/values/${encodeURIComponent(tab)}!A1:D2000`);
   return r.values || [];
 }
 
-/** מוחק את הלשונית וכותב מחדש */
+const cell = (v) =>
+  v === "" || v === null || v === undefined
+    ? {} // תא ריק באמת, ולא מחרוזת ריקה
+    : { userEnteredValue: typeof v === "number" ? { numberValue: v } : { stringValue: String(v) } };
+
+/**
+ * כותב את הפנקס ללשונית — בקריאה אחת.
+ *
+ * קודם זה היה clear ואז PUT: שתי קריאות נפרדות, וכשל רשת ביניהן היה מוחק
+ * את הגיליון ומשאיר אותו ריק. בכיתה, עם רשת בית ספר, זה תרחיש אמיתי.
+ *
+ * updateCells על טווח לא חסום בעמודות A:D מחליף את התוכן ומנקה את מה
+ * שמעבר לשורות החדשות באותה פעולה. batchUpdate של Sheets הוא אטומי —
+ * או שהכול נכתב, או ששום דבר לא משתנה ומה שהיה קודם נשאר שלם.
+ */
 export async function writeRows(tab, rows) {
-  await ensureTab(tab);
-  await api(`/values/${encodeURIComponent(tab)}!A1:D2000:clear`, { method: "POST", body: "{}" });
-  await api(
-    `/values/${encodeURIComponent(tab)}!A1?valueInputOption=RAW`,
-    { method: "PUT", body: JSON.stringify({ values: rows }) }
-  );
+  const sheetId = await tabId(tab);
+  await api(":batchUpdate", {
+    method: "POST",
+    body: JSON.stringify({
+      requests: [
+        {
+          updateCells: {
+            range: { sheetId, startRowIndex: 0, startColumnIndex: 0, endColumnIndex: 4 },
+            fields: "userEnteredValue",
+            rows: rows.map((r) => ({ values: r.map(cell) })),
+          },
+        },
+      ],
+    }),
+  });
 }
