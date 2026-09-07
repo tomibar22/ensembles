@@ -9,6 +9,11 @@ import {
   ROLE_LABEL,
   EMPTY,
   applyLesson,
+  ATT_TAB,
+  lessonAttendance,
+  mergeAttendance,
+  attToRows,
+  rowsToAtt,
   addToDraw,
   removeFromDraw,
   repairDraw,
@@ -47,6 +52,7 @@ const store = {
 /* מי לא הגיע היום. נשמר ליום אחד בלבד: היעדרות שנגררת בשקט לשיעור הבא
    מסוכנת יותר מהטרחה לסמן מחדש. */
 const ABSENT_KEY = (cls) => `ens-absent-${TABS[cls]}`;
+const ATT_KEY = (cls) => `ens-att-${TABS[cls]}`;
 const todayStamp = () => new Date().toISOString().slice(0, 10);
 
 function loadAbsent(cls) {
@@ -60,6 +66,18 @@ function loadAbsent(cls) {
   }
 }
 const saveAbsent = (cls, ids) => store.set(ABSENT_KEY(cls), JSON.stringify({ d: todayStamp(), ids }));
+
+/* יומן הנוכחות נשמר גם מקומית, כדי ששיעור לא ילך לאיבוד כשאין רשת */
+function loadAtt(cls) {
+  try {
+    const r = store.get(ATT_KEY(cls));
+    const o = r ? JSON.parse(r.value) : null;
+    return Array.isArray(o) ? o : [];
+  } catch {
+    return [];
+  }
+}
+const saveAtt = (cls, log) => store.set(ATT_KEY(cls), JSON.stringify(log));
 
 /* ============================ עיצוב ============================ */
 
@@ -156,6 +174,9 @@ export default function App() {
   const [showHelp, setShowHelp] = useState(false);
   // הפנקס כפי שהיה לפני שהשיעור הזה נשמר — הבסיס לשמירה חוזרת ולביטול
   const [lessonBase, setLessonBase] = useState(null);
+  // מי סומן חסר ברגע החלוקה. ההשוואה מולו בסוף השיעור היא שמזהה איחורים.
+  const [absentAtDraw, setAbsentAtDraw] = useState(null);
+  const [attLog, setAttLog] = useState([]);
   const [transfer, setTransfer] = useState(null); // טקסט הפנקס לייצוא/ייבוא
   const [note, setNote] = useState("");
   const [gOn, setGOn] = useState(Sheets.connected());
@@ -205,6 +226,8 @@ export default function App() {
   useEffect(() => {
     setKPick(null);
     setLessonBase(null);
+    setAbsentAtDraw(null);
+    setAttLog(loadAtt(cls));
     setAbsent(new Set(loadAbsent(cls)));
     setRes(null);
     setSaved(false);
@@ -310,6 +333,13 @@ export default function App() {
         const next = rowsToLedger(cls, rows);
         setLedger(next);
         setLessonBase(null);
+        try {
+          const log = rowsToAtt(await Sheets.readRows(ATT_TAB(cls), 5));
+          setAttLog(log);
+          saveAtt(cls, log);
+        } catch {
+          // יומן הנוכחות הוא תוספת — כשל בקריאתו לא צריך להפיל את הסנכרון
+        }
         store.set(KEYS[cls], JSON.stringify(next));
         setGMsg(`מסונכרן · ${next.lessons} שיעורים בגיליון`);
       } catch (e) {
@@ -345,13 +375,16 @@ export default function App() {
     setSaved(false);
     setLiveMsg("");
     setSel(null);
+    // תמונת הנוכחות נלקחת בחלוקה הראשונה של השיעור ונשמרת גם אם מחלקים
+    // מחדש — אחרת חלוקה חוזרת הייתה מוחקת את רישום האיחורים
+    if (r && !absentAtDraw) setAbsentAtDraw(new Set(absent));
     if (r) setShowRoll(false);
     setDrawErr(
       r
         ? ""
         : `אי אפשר להרכיב ${k} הרכבים מ-${pool.length} הנוכחים — בכל הרכב חייבים תופים, בס וכלי הרמוני. נסה פחות הרכבים, או בדוק את הנוכחות.`
     );
-  }, [pool, k, ledger]);
+  }, [pool, k, ledger, absent, absentAtDraw]);
 
   const save = async () => {
     if (!res) return;
@@ -363,30 +396,55 @@ export default function App() {
     setLedger(next);
     setSaved(true);
     store.set(KEYS[cls], JSON.stringify(next));
+
+    /* יומן הנוכחות: חיסורים, איחורים ומי שיצא באמצע. נבנה מהשוואה בין
+       הנוכחות בזמן החלוקה לנוכחות עכשיו, ומוחלף כולו בשמירה חוזרת של
+       אותו שיעור כדי שלא ייווצרו כפילויות. */
+    const entries = lessonAttendance(roster, absentAtDraw || absent, absent, next.lessons, todayStamp());
+    const log = mergeAttendance(attLog, next.lessons, entries);
+    setAttLog(log);
+    saveAtt(cls, log);
+    const counts = entries.reduce((a, e) => ((a[e.status] = (a[e.status] || 0) + 1), a), {});
+    const n = (c, one, many) => c && `${c} ${c === 1 ? one : many}`;
+    const summary = [
+      n(counts.absent, "חיסור", "חיסורים"),
+      n(counts.late, "איחור", "איחורים"),
+      counts.left && `${counts.left} ${counts.left === 1 ? "יצא" : "יצאו"} באמצע`,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+
     if (Sheets.connected()) {
       setGBusy(true);
       try {
         await Sheets.writeRows(TABS[cls], ledgerToRows(cls, next));
-        setGMsg(`נשמר בגיליון · ${next.lessons} שיעורים`);
+        await Sheets.writeRows(ATT_TAB(cls), attToRows(log), 5);
+        setGMsg(`נשמר בגיליון · ${next.lessons} שיעורים${summary ? " · " + summary : ""}`);
       } catch (e) {
         setGOn(Sheets.connected());
         setGMsg("נשמר במכשיר אבל לא בגיליון — " + e.message);
       } finally {
         setGBusy(false);
       }
+    } else if (summary) {
+      setGMsg(`נרשם במכשיר · ${summary}`);
     }
   };
 
   const undoSave = async () => {
     if (!lessonBase) return;
     const back = lessonBase;
+    const log = attLog.filter((e) => e.lesson !== ledger.lessons);
     setLedger(back);
     setLessonBase(null);
     setSaved(false);
+    setAttLog(log);
+    saveAtt(cls, log);
     store.set(KEYS[cls], JSON.stringify(back));
     if (Sheets.connected()) {
       try {
         await Sheets.writeRows(TABS[cls], ledgerToRows(cls, back));
+        await Sheets.writeRows(ATT_TAB(cls), attToRows(log), 5);
         setGMsg(`השמירה בוטלה · ${back.lessons} שיעורים`);
       } catch (e) {
         setGMsg("בוטל במכשיר אבל לא בגיליון — " + e.message);
@@ -399,12 +457,16 @@ export default function App() {
   const reset = async () => {
     setLedger(EMPTY);
     setLessonBase(null);
+    setAbsentAtDraw(null);
+    setAttLog([]);
+    saveAtt(cls, []);
     setSaved(false);
     store.set(KEYS[cls], JSON.stringify(EMPTY));
     if (Sheets.connected()) {
       try {
         await Sheets.writeRows(TABS[cls], ledgerToRows(cls, EMPTY));
-        setGMsg("הפנקס אופס גם בגיליון");
+        await Sheets.writeRows(ATT_TAB(cls), attToRows([]), 5);
+        setGMsg("הפנקס ויומן הנוכחות אופסו גם בגיליון");
       } catch (e) {
         setGMsg(e.message);
       }

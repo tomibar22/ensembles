@@ -399,6 +399,67 @@ function swapPlayers(res, a, b) {
   return { groups, load, bench, moved: [A.name, B.name] };
 }
 
+/* ============================ יומן נוכחות ============================ */
+
+const ATT_LABEL = { present: "נוכח", late: "איחור", absent: "חיסור", left: "יצא" };
+const ATT_TAB = (cls) => `נוכחות ${cls}`;
+
+/**
+ * מצב הנוכחות של כל תלמיד בשיעור, מתוך השוואה בין מי שסומן חסר בזמן
+ * החלוקה לבין מי שסומן חסר בסופו:
+ *   סומן חסר ונשאר חסר   → חיסור
+ *   סומן חסר ואז הוחזר    → איחור (הגיע אחרי שההרכבים כבר חולקו)
+ *   היה נוכח ואז סומן חסר → יצא באמצע
+ *   אחרת                  → נוכח
+ */
+function attendanceOf(roster, absentAtDraw, absentNow) {
+  return roster.map((s) => {
+    const was = absentAtDraw.has(s.id);
+    const now = absentNow.has(s.id);
+    return {
+      id: s.id,
+      name: s.name,
+      status: was ? (now ? "absent" : "late") : now ? "left" : "present",
+    };
+  });
+}
+
+/* ביומן נרשמות רק החריגות. מי שהיה נוכח לכל אורך השיעור לא נרשם —
+   אחרת היומן היה מתמלא בשורות שאין בהן מידע. */
+function lessonAttendance(roster, absentAtDraw, absentNow, lesson, date) {
+  return attendanceOf(roster, absentAtDraw, absentNow)
+    .filter((e) => e.status !== "present")
+    .map((e) => ({ date, lesson, id: e.id, name: e.name, status: e.status }));
+}
+
+/* שמירה חוזרת של אותו שיעור מחליפה את רשומותיו, ולא מוסיפה כפילויות */
+function mergeAttendance(log, lesson, entries) {
+  return [...log.filter((e) => e.lesson !== lesson), ...entries];
+}
+
+function attToRows(log) {
+  return [
+    ["תאריך", "שיעור", "תלמיד", "מזהה", "סטטוס"],
+    ...[...log]
+      .sort((a, b) => a.lesson - b.lesson || a.name.localeCompare(b.name, "he"))
+      .map((e) => [e.date, e.lesson, e.name, e.id, ATT_LABEL[e.status] || e.status]),
+  ];
+}
+
+function rowsToAtt(rows) {
+  const byLabel = Object.fromEntries(Object.entries(ATT_LABEL).map(([k, v]) => [v, k]));
+  return (rows || [])
+    .slice(1)
+    .filter((r) => r && r[3])
+    .map((r) => ({
+      date: r[0] || "",
+      lesson: Number(r[1]) || 0,
+      name: r[2] || "",
+      id: String(r[3]).trim(),
+      status: byLabel[String(r[4] || "").trim()] || "absent",
+    }));
+}
+
 const EMPTY = { plays: {}, pairs: {}, lessons: 0 };
 
 /**
@@ -580,6 +641,13 @@ export {
   ORDER,
   EMPTY,
   ROLE_MISSING,
+  ATT_LABEL,
+  ATT_TAB,
+  attendanceOf,
+  lessonAttendance,
+  mergeAttendance,
+  attToRows,
+  rowsToAtt,
   applyLesson,
   addToDraw,
   removeFromDraw,

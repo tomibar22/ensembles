@@ -64,10 +64,12 @@ export async function tabId(tab) {
   return r.replies[0].addSheet.properties.sheetId;
 }
 
+const COL = (n) => String.fromCharCode(64 + n); // 4 → "D"
+
 /** מחזיר מערך דו-ממדי של תאים, או [] אם הלשונית ריקה */
-export async function readRows(tab) {
+export async function readRows(tab, cols = 4) {
   await tabId(tab);
-  const r = await api(`/values/${encodeURIComponent(tab)}!A1:D2000`);
+  const r = await api(`/values/${encodeURIComponent(tab)}!A1:${COL(cols)}5000`);
   return r.values || [];
 }
 
@@ -86,7 +88,7 @@ const cell = (v) =>
  * שמעבר לשורות החדשות באותה פעולה. batchUpdate של Sheets הוא אטומי —
  * או שהכול נכתב, או ששום דבר לא משתנה ומה שהיה קודם נשאר שלם.
  */
-export async function writeRows(tab, rows) {
+export async function writeRows(tab, rows, cols = 4) {
   const sheetId = await tabId(tab);
   await api(":batchUpdate", {
     method: "POST",
@@ -94,7 +96,7 @@ export async function writeRows(tab, rows) {
       requests: [
         {
           updateCells: {
-            range: { sheetId, startRowIndex: 0, startColumnIndex: 0, endColumnIndex: 4 },
+            range: { sheetId, startRowIndex: 0, startColumnIndex: 0, endColumnIndex: cols },
             fields: "userEnteredValue",
             rows: rows.map((r) => ({ values: r.map(cell) })),
           },

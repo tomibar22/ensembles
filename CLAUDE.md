@@ -22,7 +22,7 @@ git checkout <branch>
 
 ## פקודות
 
-- `npm test` — 49 בדיקות על `node:test`, בלי תלויות. חייב להיות ירוק.
+- `npm test` — 57 בדיקות על `node:test`, בלי תלויות. חייב להיות ירוק.
   הפקודה היא `node --test` בלי תבנית glob: node 20 לא תומך בהן ו-CI נפל על זה.
 - `npm run lint` — errors בלבד חוסמים; warnings של הוקים מקובלים.
 - `npm run dev` / `npm run build`

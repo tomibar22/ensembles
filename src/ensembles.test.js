@@ -13,6 +13,12 @@ import {
   removeFromDraw,
   repairDraw,
   swapPlayers,
+  ATT_TAB,
+  attendanceOf,
+  lessonAttendance,
+  mergeAttendance,
+  attToRows,
+  rowsToAtt,
   buildRoster,
   pairKey,
   attempt,
@@ -450,6 +456,96 @@ test("סך הנגנים נשמר, וכל החלפה מותרת שומרת על �
           }
   }
   assert.ok(checked > 50, `נבדקו רק ${checked} החלפות`);
+});
+
+/* ============================ יומן נוכחות ============================ */
+
+const S = (...ids) => new Set(ids);
+
+test("איחור = סומן חסר בחלוקה, ואז הוחזר", () => {
+  const roster = ROSTERS["ט׳"];
+  const [a, b, c, d] = roster.map((x) => x.id);
+  // a חסר ונשאר חסר, b חסר והוחזר, c היה ויצא, d נוכח לכל אורך השיעור
+  const out = attendanceOf(roster, S(a, b), S(a, c));
+  const of = (id) => out.find((e) => e.id === id).status;
+  assert.equal(of(a), "absent");
+  assert.equal(of(b), "late");
+  assert.equal(of(c), "left");
+  assert.equal(of(d), "present");
+});
+
+test("ביומן נרשמות רק חריגות", () => {
+  const roster = ROSTERS["ט׳"];
+  const [a, b] = roster.map((x) => x.id);
+  const rows = lessonAttendance(roster, S(a, b), S(a), 7, "2026-09-07");
+  assert.equal(rows.length, 2, "נרשמו גם תלמידים שהיו נוכחים");
+  assert.deepEqual(
+    rows.map((e) => e.status).sort(),
+    ["absent", "late"]
+  );
+  rows.forEach((e) => {
+    assert.equal(e.lesson, 7);
+    assert.equal(e.date, "2026-09-07");
+  });
+  // שיעור בלי חריגות לא מייצר שורות
+  assert.equal(lessonAttendance(roster, S(), S(), 8, "2026-09-07").length, 0);
+});
+
+test("שמירה חוזרת של אותו שיעור מחליפה ולא מכפילה", () => {
+  const roster = ROSTERS["ט׳"];
+  const [a, b] = roster.map((x) => x.id);
+  const first = lessonAttendance(roster, S(a, b), S(a, b), 3, "2026-09-07");
+  let log = mergeAttendance([], 3, first);
+  assert.equal(log.length, 2);
+
+  // b הגיע באיחור, ושומרים שוב את אותו שיעור
+  const second = lessonAttendance(roster, S(a, b), S(a), 3, "2026-09-07");
+  log = mergeAttendance(log, 3, second);
+  assert.equal(log.filter((e) => e.lesson === 3).length, 2, "נוצרו כפילויות");
+  assert.equal(log.find((e) => e.id === b).status, "late", "האיחור לא עודכן");
+  assert.equal(log.find((e) => e.id === a).status, "absent");
+});
+
+test("יומן של שיעורים אחרים לא נפגע", () => {
+  const roster = ROSTERS["ט׳"];
+  const [a] = roster.map((x) => x.id);
+  const log = mergeAttendance(
+    lessonAttendance(roster, S(a), S(a), 1, "2026-09-01"),
+    2,
+    lessonAttendance(roster, S(a), S(), 2, "2026-09-08")
+  );
+  assert.equal(log.length, 2);
+  const again = mergeAttendance(log, 2, lessonAttendance(roster, S(), S(), 2, "2026-09-08"));
+  assert.equal(again.length, 1, "שיעור 1 נמחק");
+  assert.equal(again[0].lesson, 1);
+});
+
+test("שורות הגיליון הלוך ושוב", () => {
+  const roster = ROSTERS["י״א"];
+  const [a, b, c] = roster.map((x) => x.id);
+  const log = mergeAttendance([], 4, lessonAttendance(roster, S(a, b), S(a, c), 4, "2026-09-07"));
+  const rows = attToRows(log);
+  assert.deepEqual(rows[0], ["תאריך", "שיעור", "תלמיד", "מזהה", "סטטוס"]);
+  assert.equal(rows.length, log.length + 1);
+  assert.ok(rows.slice(1).every((r) => r.length === 5));
+  // התוויות בעברית, קריאות בגיליון
+  const labels = rows.slice(1).map((r) => r[4]);
+  labels.forEach((l) => assert.ok(["חיסור", "איחור", "יצא"].includes(l), l));
+
+  const back = rowsToAtt(rows);
+  const key = (e) => `${e.lesson}|${e.id}|${e.status}|${e.date}`;
+  assert.deepEqual(back.map(key).sort(), log.map(key).sort());
+});
+
+test("יומן ריק וגיליון ריק לא מפילים", () => {
+  assert.deepEqual(rowsToAtt([]), []);
+  assert.deepEqual(rowsToAtt([["תאריך", "שיעור", "תלמיד", "מזהה", "סטטוס"]]), []);
+  assert.equal(attToRows([]).length, 1);
+});
+
+test("שם הלשונית נגזר מהכיתה", () => {
+  CLASSES.forEach((c) => assert.equal(ATT_TAB(c), `נוכחות ${c}`));
+  assert.equal(new Set(CLASSES.map(ATT_TAB)).size, CLASSES.length, "שתי כיתות לאותה לשונית");
 });
 
 /* ============================ capacity ============================ */

@@ -74,6 +74,22 @@ test("לשונית חסרה נוצרת, והמזהה שלה משמש לכתיב�
   assert.equal(req.range.sheetId, 77, "הכתיבה לא השתמשה במזהה הלשונית החדשה");
 });
 
+test("יומן הנוכחות נכתב על חמש עמודות", async () => {
+  const calls = stubFetch(() => ({ sheets: [{ properties: { sheetId: 9, title: "נוכחות ט׳" } }] }));
+  const rows = [
+    ["תאריך", "שיעור", "תלמיד", "מזהה", "סטטוס"],
+    ["2026-09-07", 1, "אילה", "אילה-אוריין", "איחור"],
+  ];
+  await writeRows("נוכחות ט׳", rows, 5);
+  const post = calls.find((c) => c.method === "POST");
+  const req = JSON.parse(post.body).requests[0].updateCells;
+  assert.equal(req.range.endColumnIndex, 5, "עמודת הסטטוס נחתכה");
+  assert.equal(req.rows[1].values.length, 5);
+  assert.deepEqual(req.rows[1].values[4], { userEnteredValue: { stringValue: "איחור" } });
+  // שם לשונית בעברית חייב לעבור קידוד תקין ב-URL
+  assert.ok(calls.every((c) => !/[\u0590-\u05FF]/.test(c.url)), "שם הלשונית לא קודד");
+});
+
 test("קריאה מחזירה שורות, ולשונית ריקה מחזירה מערך ריק", async () => {
   stubFetch((url) => (url.includes("/values/") ? { values: ROWS } : META));
   assert.deepEqual(await readRows("g9"), ROWS);
