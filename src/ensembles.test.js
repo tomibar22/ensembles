@@ -14,6 +14,7 @@ import {
   repairDraw,
   swapPlayers,
   ATT_TAB,
+  FORMER_NAMES,
   attendanceOf,
   lessonAttendance,
   mergeAttendance,
@@ -723,6 +724,44 @@ test("גיליון ישן בלי עמודת מזהה עדיין נקרא לפי 
   const back = rowsToLedger(cls, old);
   ids.forEach((id) => assert.equal(back.plays[id], ledger.plays[id]));
   assert.deepEqual(back.pairs, ledger.pairs);
+});
+
+test("שינוי שם תלמיד לא מאבד היסטוריה בגיליון ישן (רגרסיה)", () => {
+  const cls = "ט׳";
+  // גיליון שנכתב לפני עמודת המזהה, ועדיין נושא את השמות הקודמים
+  const rows = [
+    ["שיעורים", 5, "צירופים", ""],
+    ["תלמיד", "הרכבים", "", ""],
+    ["סמואל", 7, "", ""],
+    ["דניאל", 4, "", ""],
+  ];
+  const back = rowsToLedger(cls, rows);
+  assert.equal(back.plays["סמואל-כהן אוריה"], 7, "ההיסטוריה של אוריה אבדה");
+  assert.equal(back.plays["דניאל-סלומון"], 4, "ההיסטוריה של דני אבדה");
+});
+
+test("כל שם קודם מצביע על מזהה שקיים באחת הכיתות", () => {
+  const all = new Set(CLASSES.flatMap((c) => ROSTERS[c].map((s) => s.id)));
+  Object.entries(FORMER_NAMES).forEach(([name, id]) =>
+    assert.ok(all.has(id), `${name} מצביע על מזהה שאינו קיים: ${id}`)
+  );
+});
+
+test("שם קודם לא גובר על שם קיים", () => {
+  // אם שם קודם מתנגש בשם של תלמיד אחר בכיתה, השם הקיים מנצח
+  CLASSES.forEach((cls) => {
+    const live = new Set(ROSTERS[cls].map((s) => s.name));
+    Object.keys(FORMER_NAMES).forEach((name) => {
+      if (!live.has(name)) return;
+      const rows = [
+        ["שיעורים", 1, "צירופים", ""],
+        ["תלמיד", "הרכבים", "", ""],
+        [name, 9, "", ""],
+      ];
+      const owner = ROSTERS[cls].find((s) => s.name === name);
+      assert.equal(rowsToLedger(cls, rows).plays[owner.id], 9, `${name} שויך לתלמיד הלא נכון`);
+    });
+  });
 });
 
 test("שורה בגיליון שאין לה מקבילה ברשימה לא מזייפת צירופים", () => {
