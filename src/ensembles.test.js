@@ -32,6 +32,10 @@ import {
 } from "./ensembles.js";
 
 const poolOf = (cls, teacher = true) => (teacher ? [...ROSTERS[cls], TEACHER] : ROSTERS[cls]);
+/* מספר ההרכבים נגזר מהנתונים ולא מקובע: עריכת רשימת התלמידים משנה את
+   מה שאפשר, ובדיקה שמקבעת מספר נשברת בכל שינוי כזה. */
+const recK = (cls) => capacity(poolOf(cls)).rec;
+const recDraw = (cls, ledger = EMPTY) => bestDraw(poolOf(cls), recK(cls), ledger);
 const each = (fn) => CLASSES.forEach((cls) => [true, false].forEach((t) => fn(cls, t)));
 
 /* ============================ הרשימה ============================ */
@@ -110,7 +114,7 @@ test("הפנקס מזיז עדיפות: מי שצבר הרבה יושב לפני
 
 test("שמירת שיעור מוסיפה שיעור אחד ומעדכנת רק את מי שניגן", () => {
   const roster = ROSTERS["ט׳"];
-  const r = bestDraw([...roster, TEACHER], 3, EMPTY);
+  const r = bestDraw([...roster, TEACHER], recK("ט׳"), EMPTY);
   const next = applyLesson(roster, r, EMPTY);
   assert.equal(next.lessons, 1);
   const played = new Set(Object.keys(r.load));
@@ -126,11 +130,11 @@ test("שמירה חוזרת מעל אותו בסיס מחליפה ולא נספ�
   // תיקון נוכחות אחרי שמירה, חלוקה מחדש ושמירה שוב — שיעור אחד, לא שניים
   const roster = ROSTERS["ט׳"];
   const base = { plays: {}, pairs: {}, lessons: 4 };
-  const first = applyLesson(roster, bestDraw([...roster, TEACHER], 3, base), base);
+  const first = applyLesson(roster, bestDraw([...roster, TEACHER], recK("ט׳"), base), base);
   assert.equal(first.lessons, 5);
 
   const absent = new Set([roster[0].id]);
-  const redraw = bestDraw([...roster.filter((s) => !absent.has(s.id)), TEACHER], 3, base);
+  const redraw = bestDraw([...roster.filter((s) => !absent.has(s.id)), TEACHER], recK("ט׳"), base);
   const second = applyLesson(roster, redraw, base); // מעל אותו בסיס, לא מעל התוצאה
   assert.equal(second.lessons, 5, "השמירה השנייה נספרה כשיעור נוסף");
 
@@ -143,13 +147,13 @@ test("applyLesson לא משנה את הבסיס, כדי שאפשר יהיה לב
   const roster = ROSTERS["ט׳"];
   const base = { plays: { [roster[1].id]: 3 }, pairs: { [pairKey(roster[0].id, roster[1].id)]: 2 }, lessons: 4 };
   const snapshot = JSON.parse(JSON.stringify(base));
-  applyLesson(roster, bestDraw([...roster, TEACHER], 3, base), base);
+  applyLesson(roster, bestDraw([...roster, TEACHER], recK("ט׳"), base), base);
   assert.deepEqual(base, snapshot, "הבסיס שונה במקום להיות מועתק");
 });
 
 /* ==================== שינוי נוכחות באמצע השיעור ==================== */
 
-const drawFor = (cls, k) => bestDraw([...ROSTERS[cls], TEACHER], k, EMPTY);
+const drawFor = (cls, k) => bestDraw([...ROSTERS[cls], TEACHER], k ?? recK("ט׳"), EMPTY);
 
 test("מי שהגיע באיחור נכנס להרכב בלי לפרק את השאר", () => {
   const cls = "י״א";
@@ -175,23 +179,25 @@ test("מי שהגיע באיחור נכנס להרכב בלי לפרק את הש
 });
 
 test("מי שכבר בחלוקה לא נכנס פעמיים", () => {
-  const r = drawFor("ט׳", 3);
+  const r = drawFor("ט׳");
   const inside = r.groups[0][0];
   assert.equal(addToDraw(r, inside, EMPTY), null);
 });
 
 test("כשאין כיסא פנוי מדווחים במקום לדחוף בכוח", () => {
   // מתופף נוסף כשכל ההרכבים כבר מלאים בתופים
-  const r = drawFor("ט׳", 3);
+  const r = drawFor("ט׳");
   r.groups.forEach((g) => assert.ok(g.some((m) => m.playing === "תופים")));
   const extraDrummer = { id: "חדש-מתופף", name: "חדש", instruments: ["תופים"], roles: ["drums"] };
   assert.equal(addToDraw(r, extraDrummer, EMPTY), null);
 });
 
 test("מי שממלא תפקיד חסר מקבל עדיפות על ההרכב הקטן", () => {
-  const r = drawFor("ט׳", 3);
+  // י״א ולא ט׳: צריך בסיסט שמנגן בהרכב אחד בלבד, וזה קיים רק כשיש די בסיסטים
+  const r = drawFor("י״א");
   // בסיסט שמנגן בהרכב אחד בלבד: הוצאתו פותחת חור יחיד, שאפשר לבדוק במדויק
   const bassist = r.groups.flat().find((m) => m.playing === "בס" && r.load[m.id] === 1);
+  assert.ok(bassist, "אין בסיסט שמנגן בהרכב אחד בלבד");
   const at = r.groups.findIndex((g) => g.some((m) => m.id === bassist.id));
   const gapped = removeFromDraw(r, bassist.id);
   assert.ok(gapped.broken.some((b) => b.group === at && b.missing.includes("bass")));
@@ -204,7 +210,7 @@ test("מי שממלא תפקיד חסר מקבל עדיפות על ההרכב ה
 });
 
 test("תלמיד שמנגן בשני הרכבים משאיר שני חורים כשהוא יוצא", () => {
-  const r = drawFor("ט׳", 3);
+  const r = drawFor("ט׳");
   const twice = r.groups.flat().find((m) => r.load[m.id] === 2 && !m.teacher);
   if (!twice) return; // לא בכל חלוקה יש כזה
   const out = removeFromDraw(r, twice.id);
@@ -215,7 +221,7 @@ test("תלמיד שמנגן בשני הרכבים משאיר שני חורים �
 });
 
 test("הוצאת תלמיד לא נוגעת בשאר ומדווחת על תפקיד שנפער", () => {
-  const r = drawFor("ט׳", 3);
+  const r = drawFor("ט׳");
   const drummer = r.groups[0].find((m) => m.playing === "תופים");
   const out = removeFromDraw(r, drummer.id);
   assert.ok(!out.groups.flat().some((m) => m.id === drummer.id), "התלמיד עדיין בחלוקה");
@@ -234,8 +240,8 @@ test("הוצאת תלמיד לא נוגעת בשאר ומדווחת על תפק�
 test("הוצאה והחזרה לא משנות את סך הניגון בפנקס", () => {
   const cls = "ט׳";
   const roster = ROSTERS[cls];
-  const r = drawFor(cls, 3);
-  const someone = r.groups[2].find((m) => !m.teacher && m.slot === "melody");
+  const r = drawFor(cls);
+  const someone = r.groups.flat().find((m) => !m.teacher && m.slot === "melody");
   const back = addToDraw(removeFromDraw(r, someone.id), roster.find((s) => s.id === someone.id), EMPTY);
   const before = applyLesson(roster, r, EMPTY);
   const after = applyLesson(roster, back, EMPTY);
@@ -257,7 +263,7 @@ test("יציאת נגן ריתמיקה נסתמת, והכלל נשמר בכל ה
   const roster = ROSTERS[cls];
   let fixedCount = 0;
   for (let t = 0; t < 25; t++) {
-    const r = bestDraw([...roster, TEACHER], 3, EMPTY);
+    const r = bestDraw([...roster, TEACHER], recK("ט׳"), EMPTY);
     for (const inst of ["תופים", "בס", "פסנתר"]) {
       const victim = r.groups.flat().find((m) => m.playing === inst && !m.teacher);
       if (!victim) continue;
@@ -273,7 +279,7 @@ test("יציאת נגן ריתמיקה נסתמת, והכלל נשמר בכל ה
 
 test("ההשלמה לא מזיזה אף אחד ממקומו", () => {
   const roster = ROSTERS["י״א"];
-  const r = bestDraw([...roster, TEACHER], 3, EMPTY);
+  const r = bestDraw([...roster, TEACHER], recK("י״א"), EMPTY);
   const victim = r.groups.flat().find((m) => m.playing === "בס" && !m.teacher);
   const present = roster.filter((s) => s.id !== victim.id);
   const fixed = repairDraw(removeFromDraw(r, victim.id), [...present, TEACHER], EMPTY);
@@ -306,7 +312,7 @@ test("ההשלמה מעדיפה מי שעוד לא מנגן היום על מי �
 
 test("אף אחד לא חורג מהמכסה בגלל ההשלמה", () => {
   const roster = ROSTERS["ט׳"];
-  const r = bestDraw([...roster, TEACHER], 3, EMPTY);
+  const r = bestDraw([...roster, TEACHER], recK("ט׳"), EMPTY);
   const victim = r.groups.flat().find((m) => m.playing === "תופים" && !m.teacher);
   const present = roster.filter((s) => s.id !== victim.id);
   const fixed = repairDraw(removeFromDraw(r, victim.id), [...present, TEACHER], EMPTY);
@@ -337,31 +343,35 @@ const missingIn = (g) =>
 
 test("החלפה תקינה מזיזה בדיוק שני נגנים ולא נוגעת בשאר", () => {
   const roster = ROSTERS["י״א"];
-  const r = bestDraw([...roster, TEACHER], 3, EMPTY);
+  const r = bestDraw([...roster, TEACHER], recK("י״א"), EMPTY);
   // לא כל זוג ניתן להחלפה — גיטריסט מסומן melody אבל הכלי שלו ייחודי,
-  // ולכן ייתכן שאין לו כיסא ביעד. מחפשים זוג שההחלפה בו באמת מותרת.
-  let A, B, out;
-  for (const x of r.groups[0]) {
-    for (const y of r.groups[1]) {
-      const t = swapPlayers(r, { g: 0, id: x.id }, { g: 1, id: y.id });
-      if (!t.error) ((A = x), (B = y), (out = t));
-      if (out) break;
-    }
-    if (out) break;
-  }
-  assert.ok(out, "לא נמצאה אף החלפה מותרת בין שני ההרכבים");
+  // ולכן ייתכן שאין לו כיסא ביעד. סורקים את כל הזוגות עד שנמצאת החלפה מותרת.
+  let A, B, gi, gj, out;
+  outer: for (let i = 0; i < r.groups.length; i++)
+    for (let j = i + 1; j < r.groups.length; j++)
+      for (const x of r.groups[i])
+        for (const y of r.groups[j]) {
+          const t = swapPlayers(r, { g: i, id: x.id }, { g: j, id: y.id });
+          if (t.error) continue;
+          (A = x), (B = y), (gi = i), (gj = j), (out = t);
+          break outer;
+        }
+  assert.ok(out, "לא נמצאה אף החלפה מותרת בכל החלוקה");
 
-  assert.ok(out.groups[0].some((m) => m.id === B.id), "B לא הגיע להרכב 1");
-  assert.ok(out.groups[1].some((m) => m.id === A.id), "A לא הגיע להרכב 2");
-  assert.ok(!out.groups[0].some((m) => m.id === A.id));
-  assert.ok(!out.groups[1].some((m) => m.id === B.id));
+  assert.ok(out.groups[gi].some((m) => m.id === B.id), "B לא הגיע להרכב של A");
+  assert.ok(out.groups[gj].some((m) => m.id === A.id), "A לא הגיע להרכב של B");
+  assert.ok(!out.groups[gi].some((m) => m.id === A.id));
+  assert.ok(!out.groups[gj].some((m) => m.id === B.id));
+
   // כל שאר ההרכבים זהים בייט-בייט
-  for (let i = 2; i < r.groups.length; i++) assert.deepEqual(ids(out.groups[i]), ids(r.groups[i]));
-  // ומי שלא הוחלף נשאר במקומו בשני ההרכבים שנגעו בהם
-  [0, 1].forEach((i) => {
-    const before = r.groups[i].filter((m) => m.id !== A.id && m.id !== B.id).map((m) => m.id);
-    const after = out.groups[i].filter((m) => m.id !== A.id && m.id !== B.id).map((m) => m.id);
-    assert.deepEqual(after.sort(), before.sort(), `הרכב ${i + 1} השתנה מעבר להחלפה`);
+  r.groups.forEach((g, i) => {
+    if (i === gi || i === gj) return;
+    assert.deepEqual(ids(out.groups[i]), ids(g), `הרכב ${i + 1} השתנה`);
+  });
+  // ומי שלא הוחלף נשאר במקומו גם בשני ההרכבים שנגעו בהם
+  [gi, gj].forEach((i) => {
+    const keep = (arr) => arr.filter((m) => m.id !== A.id && m.id !== B.id).map((m) => m.id).sort();
+    assert.deepEqual(keep(out.groups[i]), keep(r.groups[i]), `הרכב ${i + 1} השתנה מעבר להחלפה`);
   });
 });
 
@@ -384,7 +394,7 @@ test("הכלל נשמר: החלפה ששוברת ריתמיקה נדחית עם 
 
 test("החלפת שני מתופפים בין הרכבים מותרת", () => {
   const roster = ROSTERS["י״א"];
-  const r = bestDraw([...roster, TEACHER], 3, EMPTY);
+  const r = bestDraw([...roster, TEACHER], recK("י״א"), EMPTY);
   const d0 = findIn(r, 0, (m) => m.playing === "תופים");
   const d1 = findIn(r, 1, (m) => m.playing === "תופים");
   const out = swapPlayers(r, { g: 0, id: d0.id }, { g: 1, id: d1.id });
@@ -397,8 +407,22 @@ test("החלפת שני מתופפים בין הרכבים מותרת", () => {
   );
 });
 
+test("תלמיד שמנגן בשני הרכבים לא מתחלף עם עצמו (רגרסיה)", () => {
+  const roster = ROSTERS["ט׳"];
+  for (let t = 0; t < 30; t++) {
+    const r = bestDraw([...roster, TEACHER], recK("ט׳"), EMPTY);
+    const twice = r.groups.flat().find((m) => r.load[m.id] === 2 && !m.teacher);
+    if (!twice) continue;
+    const gs = r.groups.map((g, i) => (g.some((m) => m.id === twice.id) ? i : -1)).filter((i) => i >= 0);
+    const out = swapPlayers(r, { g: gs[0], id: twice.id }, { g: gs[1], id: twice.id });
+    assert.ok(out.error, "התקבלה החלפה של תלמיד עם עצמו");
+    assert.match(out.error, /אותו תלמיד/);
+    return;
+  }
+});
+
 test("החלפה בתוך אותו הרכב נדחית", () => {
-  const r = bestDraw([...ROSTERS["ט׳"], TEACHER], 3, EMPTY);
+  const r = recDraw("ט׳");
   const [x, y] = r.groups[0];
   assert.match(swapPlayers(r, { g: 0, id: x.id }, { g: 0, id: y.id }).error, /באותו מקום/);
 });
@@ -406,7 +430,7 @@ test("החלפה בתוך אותו הרכב נדחית", () => {
 test("תלמיד לא מוחלף להרכב שהוא כבר מנגן בו", () => {
   const roster = ROSTERS["ט׳"];
   for (let t = 0; t < 30; t++) {
-    const r = bestDraw([...roster, TEACHER], 3, EMPTY);
+    const r = bestDraw([...roster, TEACHER], recK("ט׳"), EMPTY);
     const twice = r.groups.flat().find((m) => r.load[m.id] === 2 && !m.teacher);
     if (!twice) continue;
     const gs = r.groups.map((g, i) => (g.some((m) => m.id === twice.id) ? i : -1)).filter((i) => i >= 0);
@@ -440,7 +464,7 @@ test("סך הנגנים נשמר, וכל החלפה מותרת שומרת על �
   const roster = ROSTERS["י״א"];
   let checked = 0;
   for (let t = 0; t < 10; t++) {
-    const r = bestDraw([...roster, TEACHER], 3, EMPTY);
+    const r = bestDraw([...roster, TEACHER], recK("י״א"), EMPTY);
     // עוברים על כל זוגות ההחלפה האפשריים ובודקים כל אחת שהתקבלה
     for (let i = 0; i < r.groups.length; i++)
       for (let j = i + 1; j < r.groups.length; j++)
@@ -579,12 +603,22 @@ test("כשאין k מושלם בוחרים את הטוב שנמצא ולא נו�
   assert.equal(rec, 2);
 });
 
-test("ההמלצה מכבדת את גודל ההרכב כשאפשר", () => {
+test("ההמלצה מכבדת את גודל ההרכב כשאפשר, ואחרת בוחרת את הטוב ביותר", () => {
+  const biggest = (pool, k) => {
+    const all = attempt(pool, k, EMPTY, 40);
+    return all.length ? Math.min(...all.map((r) => Math.max(...r.groups.map((g) => g.length)))) : Infinity;
+  };
   each((cls, teacher) => {
     const pool = poolOf(cls, teacher);
-    const { rec } = capacity(pool);
-    const sizes = attempt(pool, rec, EMPTY, 40).map((r) => Math.max(...r.groups.map((g) => g.length)));
-    assert.ok(Math.min(...sizes) <= MAX_GROUP, `${cls}: כל החלוקות גדולות מ-${MAX_GROUP}`);
+    const { max, rec } = capacity(pool);
+    if (biggest(pool, rec) <= MAX_GROUP) return; // ההמלצה עומדת בגודל — הכול טוב
+
+    // אחרת: מותר רק אם אף k אחר לא היה עומד בו. אחרת נבחרה המלצה גרועה מהצורך.
+    for (let k = 1; k <= max; k++)
+      assert.ok(
+        biggest(pool, k) > MAX_GROUP,
+        `${cls}: k=${k} היה נותן הרכבים עד ${MAX_GROUP}, אבל ההמלצה הייתה ${rec}`
+      );
   });
 });
 
