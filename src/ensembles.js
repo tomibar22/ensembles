@@ -4,22 +4,6 @@
 /* ============================ נתוני התלמידים ============================ */
 
 const RAW = {
-  "ט׳": [
-    ["אילה", "אוריין", ["אלט"], "אילה-אוריין"],
-    ["אביגיל", "וייס גולדשטיין", ["שירה"], "אביגיל-וייס גולדשטיין"],
-    ["אלונה", "זעירא", ["חליל"], "אלונה-זעירא"],
-    ["נועם", "טל", ["טנור"], "נועם-טל"],
-    ["יהלי", "יריב", ["גיטרה", "בס"], "יהלי-יריב"],
-    ["עדאל", "ירמקוב", ["שירה"], "עדאל-ירמקוב"],
-    ["סמואל", "כהן אוריה", ["חצוצרה"], "סמואל-כהן אוריה"],
-    ["ניב", "כנען", ["בס"], "ניב-כנען"],
-    ["לאו", "סוסנה", ["תופים"], "לאו-סוסנה"],
-    ["דניאל", "סלומון", ["חצוצרה"], "דניאל-סלומון"],
-    ["אלון", "ספורטא", ["פסנתר"], "אלון-ספורטא"],
-    ["מאיה", "פינטו", ["חליל"], "מאיה-פינטו"],
-    ["אדם", "פלוינסקי", ["פסנתר"], "אדם-פלוינסקי"],
-    ["יהונתן", "פריינטא", ["תופים"], "יהונתן-פריינטא"],
-  ],
   "י״א": [
     ["מעיין", "אלפר", ["תופים"], "מעיין-אלפר"],
     ["נועם", "בנימיני", ["תופים"], "נועם-בנימיני"],
@@ -43,6 +27,22 @@ const RAW = {
     ["ארתור", "שטרן", ["גיטרה"], "ארתור-שטרן"],
     ["קורה", "שפע", ["אלט"], "קורה-שפע"],
     ["ניאה", "תורן", ["שירה"], "ניאה-תורן"],
+  ],
+  "ט׳": [
+    ["אילה", "אוריין", ["אלט"], "אילה-אוריין"],
+    ["אביגיל", "וייס גולדשטיין", ["שירה"], "אביגיל-וייס גולדשטיין"],
+    ["אלונה", "זעירא", ["חליל"], "אלונה-זעירא"],
+    ["נועם", "טל", ["טנור"], "נועם-טל"],
+    ["יהלי", "יריב", ["גיטרה", "בס"], "יהלי-יריב"],
+    ["עדאל", "ירמקוב", ["שירה"], "עדאל-ירמקוב"],
+    ["סמואל", "כהן אוריה", ["חצוצרה"], "סמואל-כהן אוריה"],
+    ["ניב", "כנען", ["בס"], "ניב-כנען"],
+    ["לאו", "סוסנה", ["תופים"], "לאו-סוסנה"],
+    ["דניאל", "סלומון", ["חצוצרה"], "דניאל-סלומון"],
+    ["אלון", "ספורטא", ["פסנתר"], "אלון-ספורטא"],
+    ["מאיה", "פינטו", ["חליל"], "מאיה-פינטו"],
+    ["אדם", "פלוינסקי", ["פסנתר"], "אדם-פלוינסקי"],
+    ["יהונתן", "פריינטא", ["תופים"], "יהונתן-פריינטא"],
   ],
 };
 
@@ -328,6 +328,77 @@ function repairDraw(res, pool, ledger) {
   };
 }
 
+const BENCH = -1; // "הרכב" הספסל, לצורך בחירה והחלפה
+
+/**
+ * מחליף שני נגנים ביניהם — בין שני הרכבים, או בין הרכב לספסל.
+ * זו עריכה ידנית: המורה מכיר את הכיתה טוב יותר מהאלגוריתם, ולפעמים
+ * צירוף מסוים פשוט לא עובד. ההחלפה לא נוגעת באף אחד אחר.
+ *
+ * מחזיר { error } עם סיבה קריאה כשההחלפה שוברת כלל, כדי שאפשר יהיה
+ * לומר למורה למה — ולא סתם לסרב.
+ * a ו-b הם { g, id }, כאשר g === BENCH מציין את הספסל.
+ */
+function swapPlayers(res, a, b) {
+  if (a.g === b.g) return { error: "שני הנגנים באותו מקום" };
+  const find = (sel) =>
+    sel.g === BENCH
+      ? res.bench.find((s) => s.id === sel.id)
+      : (res.groups[sel.g] || []).find((m) => m.id === sel.id);
+  const A = find(a);
+  const B = find(b);
+  if (!A || !B) return { error: "אחד הנגנים כבר לא בחלוקה" };
+
+  const rest = (sel) => (sel.g === BENCH ? [] : res.groups[sel.g].filter((m) => m.id !== sel.id));
+  const restA = rest(a);
+  const restB = rest(b);
+
+  // תלמיד לא מנגן פעמיים באותו הרכב
+  if (b.g !== BENCH && restB.some((m) => m.id === A.id)) return { error: `${A.name} כבר מנגן בהרכב ${b.g + 1}` };
+  if (a.g !== BENCH && restA.some((m) => m.id === B.id)) return { error: `${B.name} כבר מנגן בהרכב ${a.g + 1}` };
+
+  // הכלי שהתלמיד ינגן ביעד: קודם מה שהוא מנגן עכשיו, אחרת כלי אחר שלו שפנוי
+  const fit = (s, group) =>
+    [s.playing, ...s.instruments].find(
+      (inst) =>
+        inst && s.instruments.includes(inst) && (!UNIQUE.has(inst) || !group.some((m) => m.playing === inst))
+    );
+  const instA = b.g === BENCH ? null : fit(A, restB);
+  const instB = a.g === BENCH ? null : fit(B, restA);
+  if (b.g !== BENCH && !instA) return { error: `אין כיסא פנוי ל${A.name} בהרכב ${b.g + 1}` };
+  if (a.g !== BENCH && !instB) return { error: `אין כיסא פנוי ל${B.name} בהרכב ${a.g + 1}` };
+
+  const seat = (s, inst) => ({ ...s, playing: inst, slot: ROLE_OF[inst] || "melody" });
+  const byOrder = (x, y) => orderOf(x.playing) - orderOf(y.playing);
+  const groups = res.groups.map((g, i) => {
+    if (i === a.g) return [...restA, seat(B, instB)].sort(byOrder);
+    if (i === b.g) return [...restB, seat(A, instA)].sort(byOrder);
+    return g;
+  });
+
+  // הכלל נשמר גם אחרי עריכה ידנית
+  for (const i of [a.g, b.g]) {
+    if (i === BENCH) continue;
+    const miss = missingRoles(groups[i]);
+    if (miss.length)
+      return { error: `הרכב ${i + 1} יישאר בלי ${miss.map((r) => ROLE_MISSING[r]).join(" ובלי ")}` };
+  }
+
+  // החלפה בין הרכבים לא משנה עומס. מול הספסל — היא כן.
+  const load = { ...res.load };
+  let bench = res.bench;
+  const toBench = (into, out) => {
+    load[into.id] = (load[into.id] || 0) + 1;
+    load[out.id] = (load[out.id] || 0) - 1;
+    if (!load[out.id]) delete load[out.id];
+    bench = res.bench.filter((s) => s.id !== into.id).concat([out]);
+  };
+  if (a.g === BENCH) toBench(A, B);
+  if (b.g === BENCH) toBench(B, A);
+
+  return { groups, load, bench, moved: [A.name, B.name] };
+}
+
 const EMPTY = { plays: {}, pairs: {}, lessons: 0 };
 
 /**
@@ -513,6 +584,8 @@ export {
   addToDraw,
   removeFromDraw,
   repairDraw,
+  swapPlayers,
+  BENCH,
   buildRoster,
   pairKey,
   makeGroups,

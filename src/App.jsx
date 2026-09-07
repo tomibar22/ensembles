@@ -12,6 +12,8 @@ import {
   addToDraw,
   removeFromDraw,
   repairDraw,
+  swapPlayers,
+  BENCH,
   ROLE_MISSING,
   pairKey,
   bestDraw,
@@ -74,19 +76,35 @@ const C = {
 };
 const TINT = { "תופים": C.rose, "בס": C.teal, "פסנתר": C.brass, "גיטרה": C.brass };
 
-function Chip({ m, twice }) {
+function Chip({ m, twice, onClick, state }) {
   const tint = m.teacher ? C.teal : TINT[m.playing] || C.dim;
+  const picked = state === "selected";
+  const blocked = state === "blocked";
   return (
-    <div
+    <button
+      onClick={onClick}
+      aria-pressed={picked}
+      title={picked ? "לחץ שוב לביטול" : "לחץ כדי להחליף"}
       style={{
+        font: "inherit",
+        color: "inherit",
+        cursor: "pointer",
+        opacity: blocked ? 0.3 : 1,
+        transition: "opacity .12s",
         display: "flex",
         alignItems: "center",
         gap: 8,
         minHeight: 40,
-        padding: "0 13px",
         borderRadius: 999,
-        background: m.slot !== "melody" ? "rgba(255,255,255,0.06)" : "transparent",
-        border: `1px ${m.teacher ? "dashed" : "solid"} ${m.slot !== "melody" ? tint + "66" : C.line}`,
+        background: picked
+          ? C.brass + "2E"
+          : m.slot !== "melody"
+            ? "rgba(255,255,255,0.06)"
+            : "transparent",
+        border: picked
+          ? `2px solid ${C.brass}`
+          : `1px ${m.teacher ? "dashed" : "solid"} ${m.slot !== "melody" ? tint + "66" : C.line}`,
+        padding: picked ? "0 12px" : "0 13px",
       }}
     >
       <span style={{ fontSize: 16, fontWeight: 500 }}>{m.name}</span>
@@ -108,7 +126,7 @@ function Chip({ m, twice }) {
           ×2
         </span>
       )}
-    </div>
+    </button>
   );
 }
 
@@ -131,8 +149,10 @@ export default function App() {
   const [showRoll, setShowRoll] = useState(false); // רק כדי לפתוח כשכבר יש חלוקה
   // הנוכחות פתוחה כל עוד אין חלוקה על המסך; אחריה היא מתקפלת לשורת סיכום
   const rollOpen = !res || showRoll;
+
   const [drawErr, setDrawErr] = useState("");
-  const [liveMsg, setLiveMsg] = useState(""); // מה קרה לחלוקה אחרי שינוי נוכחות תוך כדי שיעור
+  const [liveMsg, setLiveMsg] = useState("");
+  const [sel, setSel] = useState(null); // הנגן שנבחר להחלפה ידנית: { g, id }
   const [showHelp, setShowHelp] = useState(false);
   // הפנקס כפי שהיה לפני שהשיעור הזה נשמר — הבסיס לשמירה חוזרת ולביטול
   const [lessonBase, setLessonBase] = useState(null);
@@ -142,6 +162,42 @@ export default function App() {
   const [gMsg, setGMsg] = useState("");
   const [gBusy, setGBusy] = useState(false);
   const ledgerRef = useRef(ledger);
+
+  /* כשנבחר נגן, מסמנים מראש עם מי מותר להחליף אותו. עדיף להראות את זה
+     על המסך מאשר לתת למורה ללחוץ ולקבל סירוב. */
+  const swapOk = useMemo(() => {
+    if (!res || !sel) return null;
+    const ok = new Set();
+    const consider = (g, id) => {
+      if (g === sel.g && id === sel.id) return;
+      if (!swapPlayers(res, sel, { g, id }).error) ok.add(`${g}|${id}`);
+    };
+    res.groups.forEach((grp, g) => grp.forEach((m) => consider(g, m.id)));
+    res.bench.forEach((st) => consider(BENCH, st.id));
+    return ok;
+  }, [res, sel]);
+  const chipState = (g, id) => {
+    if (!sel) return "idle";
+    if (sel.g === g && sel.id === id) return "selected";
+    return swapOk && swapOk.has(`${g}|${id}`) ? "idle" : "blocked";
+  };
+  const pickChip = (g, m) => {
+    if (!sel) {
+      setSel({ g, id: m.id });
+      setLiveMsg("");
+      return;
+    }
+    if (sel.g === g && sel.id === m.id) {
+      setSel(null);
+      return;
+    }
+    const out = swapPlayers(res, sel, { g, id: m.id });
+    if (out.error) return setLiveMsg(out.error);
+    setRes({ groups: out.groups, load: out.load, bench: out.bench });
+    setSel(null);
+    setSaved(false);
+    setLiveMsg(`${out.moved[0]} ו${out.moved[1]} הוחלפו.`);
+  };
   useEffect(() => {
     ledgerRef.current = ledger;
   }, [ledger]);
@@ -154,6 +210,7 @@ export default function App() {
     setSaved(false);
     setDrawErr("");
     setLiveMsg("");
+    setSel(null);
     let alive = true;
     (async () => {
       let l = EMPTY;
@@ -182,6 +239,7 @@ export default function App() {
     saveAbsent(cls, [...next]);
     setSaved(false);
     setDrawErr("");
+    setSel(null);
 
     if (!res) return setLiveMsg("");
     const student = roster.find((s) => s.id === id);
@@ -286,6 +344,7 @@ export default function App() {
     setRes(r);
     setSaved(false);
     setLiveMsg("");
+    setSel(null);
     if (r) setShowRoll(false);
     setDrawErr(
       r
@@ -582,6 +641,14 @@ export default function App() {
           </div>
         )}
 
+        {res && (
+          <p style={{ color: sel ? C.brass : C.dim, fontSize: 13, margin: "0 0 10px", lineHeight: 1.5 }}>
+            {sel
+              ? "בחר עם מי להחליף — מי שמסומן חיוור אינו אפשרי, כי זה היה שובר הרכב. לחיצה חוזרת מבטלת."
+              : "אפשר לערוך ידנית: לחץ על תלמיד ואז על מי שתרצה להחליף אותו איתו."}
+          </p>
+        )}
+
         {res &&
           res.groups.map((g, i) => (
             <section key={i} style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14, padding: 14, marginBottom: 10 }}>
@@ -609,7 +676,13 @@ export default function App() {
               </div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                 {g.map((m) => (
-                  <Chip key={m.id + m.playing} m={m} twice={res.load[m.id] > 1} />
+                  <Chip
+                    key={m.id + m.playing}
+                    m={m}
+                    twice={res.load[m.id] > 1}
+                    state={chipState(i, m.id)}
+                    onClick={() => pickChip(i, m)}
+                  />
                 ))}
               </div>
             </section>
@@ -619,11 +692,31 @@ export default function App() {
           <section style={{ border: `1px dashed ${C.line}`, borderRadius: 14, padding: 14, marginBottom: 12 }}>
             <div style={{ color: C.dim, fontSize: 14, marginBottom: 8 }}>יושבים היום (הכי הרבה הרכבים עד עכשיו) — יקבלו עדיפות בשיעור הבא</div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-              {res.bench.map((s) => (
-                <span key={s.id} style={{ border: `1px solid ${C.line}`, borderRadius: 999, padding: "6px 12px", fontSize: 15 }}>
-                  {s.name} <span style={{ color: C.dim, fontSize: 13 }}>{s.instruments[0]}</span>
-                </span>
-              ))}
+              {res.bench.map((st) => {
+                const state = chipState(BENCH, st.id);
+                return (
+                  <button
+                    key={st.id}
+                    onClick={() => pickChip(BENCH, st)}
+                    aria-pressed={state === "selected"}
+                    title="לחץ כדי להחליף עם נגן בהרכב"
+                    style={{
+                      font: "inherit",
+                      color: "inherit",
+                      cursor: "pointer",
+                      minHeight: 40,
+                      padding: "0 13px",
+                      borderRadius: 999,
+                      fontSize: 15,
+                      background: state === "selected" ? C.brass + "2E" : "transparent",
+                      border: state === "selected" ? `2px solid ${C.brass}` : `1px solid ${C.line}`,
+                      opacity: state === "blocked" ? 0.3 : 1,
+                    }}
+                  >
+                    {st.name} <span style={{ color: C.dim, fontSize: 13 }}>{st.instruments[0]}</span>
+                  </button>
+                );
+              })}
             </div>
           </section>
         )}

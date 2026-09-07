@@ -12,6 +12,7 @@ import {
   addToDraw,
   removeFromDraw,
   repairDraw,
+  swapPlayers,
   buildRoster,
   pairKey,
   attempt,
@@ -319,6 +320,128 @@ test("כשבאמת אין מי שימלא — נאמר במפורש ולא מע�
   const fixed = repairDraw(stripped, [...present, TEACHER], EMPTY);
   assert.ok(fixed.unfixable.length > 0, "לא דווח שאי אפשר להשלים");
   fixed.unfixable.forEach((u) => assert.ok(u.missing.includes("drums")));
+});
+
+/* ==================== החלפה ידנית בין הרכבים ==================== */
+
+const findIn = (res, g, pred) => res.groups[g].find(pred);
+const ids = (g) => g.map((m) => m.id + ":" + m.playing);
+const missingIn = (g) =>
+  ["drums", "bass", "harmony"].filter((r) => !g.some((m) => ROLE_OF[m.playing] === r));
+
+test("החלפה תקינה מזיזה בדיוק שני נגנים ולא נוגעת בשאר", () => {
+  const roster = ROSTERS["י״א"];
+  const r = bestDraw([...roster, TEACHER], 3, EMPTY);
+  const A = findIn(r, 0, (m) => m.slot === "melody" && !m.teacher);
+  const B = findIn(r, 1, (m) => m.slot === "melody" && !m.teacher);
+  const out = swapPlayers(r, { g: 0, id: A.id }, { g: 1, id: B.id });
+  assert.ok(!out.error, out.error);
+
+  assert.ok(out.groups[0].some((m) => m.id === B.id), "B לא הגיע להרכב 1");
+  assert.ok(out.groups[1].some((m) => m.id === A.id), "A לא הגיע להרכב 2");
+  assert.ok(!out.groups[0].some((m) => m.id === A.id));
+  assert.ok(!out.groups[1].some((m) => m.id === B.id));
+  // כל שאר ההרכבים זהים בייט-בייט
+  for (let i = 2; i < r.groups.length; i++) assert.deepEqual(ids(out.groups[i]), ids(r.groups[i]));
+  // ומי שלא הוחלף נשאר במקומו בשני ההרכבים שנגעו בהם
+  [0, 1].forEach((i) => {
+    const before = r.groups[i].filter((m) => m.id !== A.id && m.id !== B.id).map((m) => m.id);
+    const after = out.groups[i].filter((m) => m.id !== A.id && m.id !== B.id).map((m) => m.id);
+    assert.deepEqual(after.sort(), before.sort(), `הרכב ${i + 1} השתנה מעבר להחלפה`);
+  });
+});
+
+test("הכלל נשמר: החלפה ששוברת ריתמיקה נדחית עם סיבה", () => {
+  // חלוקה בנויה ביד, כדי לבודד בדיוק את המקרה: הבסיסט של הרכב 1 מנגן גם
+  // פסנתר, ולכן יש לו כיסא פנוי בהרכב 2 — אבל הרכב 1 יישאר בלי בס.
+  const seat = (id, inst, slot, insts) => ({ id, name: id, instruments: insts || [inst], playing: inst, slot });
+  const res = {
+    groups: [
+      [seat("d1", "תופים", "drums"), seat("x", "בס", "bass", ["בס", "פסנתר"]), seat("g1", "גיטרה", "harmony")],
+      [seat("d2", "תופים", "drums"), seat("b2", "בס", "bass"), seat("g2", "גיטרה", "harmony"), seat("m2", "חליל", "melody")],
+    ],
+    load: { d1: 1, x: 1, g1: 1, d2: 1, b2: 1, g2: 1, m2: 1 },
+    bench: [],
+  };
+  const out = swapPlayers(res, { g: 0, id: "x" }, { g: 1, id: "m2" });
+  assert.ok(out.error, "החלפה ששוברת את הכלל התקבלה");
+  assert.match(out.error, /הרכב 1 יישאר בלי בס/);
+});
+
+test("החלפת שני מתופפים בין הרכבים מותרת", () => {
+  const roster = ROSTERS["י״א"];
+  const r = bestDraw([...roster, TEACHER], 3, EMPTY);
+  const d0 = findIn(r, 0, (m) => m.playing === "תופים");
+  const d1 = findIn(r, 1, (m) => m.playing === "תופים");
+  const out = swapPlayers(r, { g: 0, id: d0.id }, { g: 1, id: d1.id });
+  if (d0.id === d1.id) return; // אותו מתופף ×2 — לא רלוונטי
+  assert.ok(!out.error, out.error);
+  out.groups.forEach((g) =>
+    ["drums", "bass", "harmony"].forEach((role) =>
+      assert.ok(g.some((m) => ROLE_OF[m.playing] === role), "נשבר תפקיד")
+    )
+  );
+});
+
+test("החלפה בתוך אותו הרכב נדחית", () => {
+  const r = bestDraw([...ROSTERS["ט׳"], TEACHER], 3, EMPTY);
+  const [x, y] = r.groups[0];
+  assert.match(swapPlayers(r, { g: 0, id: x.id }, { g: 0, id: y.id }).error, /באותו מקום/);
+});
+
+test("תלמיד לא מוחלף להרכב שהוא כבר מנגן בו", () => {
+  const roster = ROSTERS["ט׳"];
+  for (let t = 0; t < 30; t++) {
+    const r = bestDraw([...roster, TEACHER], 3, EMPTY);
+    const twice = r.groups.flat().find((m) => r.load[m.id] === 2 && !m.teacher);
+    if (!twice) continue;
+    const gs = r.groups.map((g, i) => (g.some((m) => m.id === twice.id) ? i : -1)).filter((i) => i >= 0);
+    const other = r.groups[gs[1]].find((m) => m.id !== twice.id && !m.teacher);
+    const out = swapPlayers(r, { g: gs[0], id: twice.id }, { g: gs[1], id: other.id });
+    assert.ok(out.error, "התקבלה החלפה שמכניסה תלמיד פעמיים לאותו הרכב");
+    return;
+  }
+});
+
+test("החלפה מול הספסל מעבירה גם את העומס", () => {
+  const roster = ROSTERS["י״א"];
+  const r = bestDraw(roster, 2, EMPTY); // k=2 משאיר ספסל
+  assert.ok(r.bench.length, "אין ספסל");
+  const sitting = r.bench[0];
+  // מחפשים בהרכב נגן מלודי עם אותו סוג כלי, כדי שההחלפה לא תשבור ריתמיקה
+  let target = null, gi = -1;
+  r.groups.forEach((g, i) => {
+    const c = g.find((m) => m.slot === "melody" && !m.teacher);
+    if (c && !target) (target = c), (gi = i);
+  });
+  const out = swapPlayers(r, { g: -1, id: sitting.id }, { g: gi, id: target.id });
+  if (out.error) return; // לא כל צירוף אפשרי — הכלל קודם
+  assert.equal(out.load[sitting.id], 1, "מי שנכנס לא קיבל עומס");
+  assert.equal(out.load[target.id], undefined, "מי שיצא לספסל נשאר עם עומס");
+  assert.ok(out.bench.some((s) => s.id === target.id), "מי שיצא לא הגיע לספסל");
+  assert.ok(!out.bench.some((s) => s.id === sitting.id), "מי שנכנס נשאר בספסל");
+});
+
+test("סך הנגנים נשמר, וכל החלפה מותרת שומרת על ריתמיקה מלאה", () => {
+  const roster = ROSTERS["י״א"];
+  let checked = 0;
+  for (let t = 0; t < 10; t++) {
+    const r = bestDraw([...roster, TEACHER], 3, EMPTY);
+    // עוברים על כל זוגות ההחלפה האפשריים ובודקים כל אחת שהתקבלה
+    for (let i = 0; i < r.groups.length; i++)
+      for (let j = i + 1; j < r.groups.length; j++)
+        for (const A of r.groups[i])
+          for (const B of r.groups[j]) {
+            const out = swapPlayers(r, { g: i, id: A.id }, { g: j, id: B.id });
+            if (out.error) continue;
+            checked++;
+            assert.equal(out.groups.flat().length, r.groups.flat().length, "מספר הנגנים השתנה");
+            out.groups.forEach((g, gi) =>
+              assert.equal(missingIn(g).length, 0, `הרכב ${gi + 1} נשאר בלי תפקיד אחרי החלפה`)
+            );
+          }
+  }
+  assert.ok(checked > 50, `נבדקו רק ${checked} החלפות`);
 });
 
 /* ============================ capacity ============================ */
