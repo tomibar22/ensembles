@@ -32,6 +32,13 @@ import {
   bestDraw,
   capacity,
   emptyRoles,
+  SEED,
+  INSTRUMENTS,
+  rowsToRoster,
+  rosterToRows,
+  makeId,
+  assignIds,
+  rosterProblems,
   encodeLedger,
   decodeLedger,
   ledgerToRows,
@@ -1057,7 +1064,7 @@ const sampleLedger = (cls) => {
 test("גיבוי הלוך ושוב שומר על הכול", () => {
   for (const cls of CLASSES) {
     const { ids, ledger } = sampleLedger(cls);
-    const { ledger: back, dropped, added } = decodeLedger(cls, encodeLedger(cls, ledger));
+    const { ledger: back, dropped, added } = decodeLedger(cls, ROSTERS[cls], encodeLedger(cls, ROSTERS[cls], ledger));
     ids.forEach((id) => assert.equal(back.plays[id], ledger.plays[id]));
     assert.deepEqual(back.pairs, ledger.pairs);
     assert.equal(back.lessons, 4);
@@ -1069,11 +1076,11 @@ test("גיבוי הלוך ושוב שומר על הכול", () => {
 test("הוספת תלמיד לרשימה לא מזיזה לאחרים את ההיסטוריה (רגרסיה)", () => {
   const cls = "ט׳";
   const { ids, ledger } = sampleLedger(cls);
-  const text = JSON.parse(encodeLedger(cls, ledger));
+  const text = JSON.parse(encodeLedger(cls, ROSTERS[cls], ledger));
   // מדמים גיבוי שנוצר לפני שנוסף תלמיד בראש הרשימה
   text.s = text.s.slice(1);
   text.p = text.p.slice(1);
-  const { ledger: back, added } = decodeLedger(cls, JSON.stringify(text));
+  const { ledger: back, added } = decodeLedger(cls, ROSTERS[cls], JSON.stringify(text));
   ids.slice(1).forEach((id) => assert.equal(back.plays[id], ledger.plays[id], `${id} זז`));
   assert.equal(added, 1, "התלמיד החדש לא דווח");
 });
@@ -1081,25 +1088,25 @@ test("הוספת תלמיד לרשימה לא מזיזה לאחרים את הה�
 test("תלמיד שהוסר מדווח ולא משנה נתונים בשקט", () => {
   const cls = "ט׳";
   const { ledger } = sampleLedger(cls);
-  const text = JSON.parse(encodeLedger(cls, ledger));
+  const text = JSON.parse(encodeLedger(cls, ROSTERS[cls], ledger));
   text.s = ["רוח-רפאים", ...text.s.slice(1)];
-  const { dropped } = decodeLedger(cls, JSON.stringify(text));
+  const { dropped } = decodeLedger(cls, ROSTERS[cls], JSON.stringify(text));
   assert.equal(dropped, 1);
 });
 
 test("גיבוי בפורמט הישן (v1) עדיין נקרא", () => {
   const cls = "ט׳";
   const { ids, ledger } = sampleLedger(cls);
-  const v2 = JSON.parse(encodeLedger(cls, ledger));
+  const v2 = JSON.parse(encodeLedger(cls, ROSTERS[cls], ledger));
   const v1 = JSON.stringify({ v: 1, c: v2.c, l: v2.l, p: v2.p, x: v2.x }); // בלי s
-  const { ledger: back } = decodeLedger(cls, v1);
+  const { ledger: back } = decodeLedger(cls, ROSTERS[cls], v1);
   ids.forEach((id) => assert.equal(back.plays[id], ledger.plays[id]));
   assert.deepEqual(back.pairs, ledger.pairs);
 });
 
 test("גיבוי של כיתה אחרת נדחה", () => {
   const { ledger } = sampleLedger("ט׳");
-  assert.throws(() => decodeLedger("י״א", encodeLedger("ט׳", ledger)), /שייך לכיתה/);
+  assert.throws(() => decodeLedger("י״א", ROSTERS["י״א"], encodeLedger("ט׳", ROSTERS["ט׳"], ledger)), /שייך לכיתה/);
 });
 
 /* ============================ הגיליון ============================ */
@@ -1107,7 +1114,7 @@ test("גיבוי של כיתה אחרת נדחה", () => {
 test("כתיבה וקריאה של הגיליון שומרות על הכול", () => {
   for (const cls of CLASSES) {
     const { ids, ledger } = sampleLedger(cls);
-    const back = rowsToLedger(cls, ledgerToRows(cls, ledger));
+    const back = rowsToLedger(ROSTERS[cls], ledgerToRows(ROSTERS[cls], ledger));
     ids.forEach((id) => assert.equal(back.plays[id], ledger.plays[id]));
     assert.deepEqual(back.pairs, ledger.pairs);
     assert.equal(back.lessons, 4);
@@ -1116,7 +1123,7 @@ test("כתיבה וקריאה של הגיליון שומרות על הכול", (
 
 test("הגיליון נושא עמודת מזהה", () => {
   const cls = "ט׳";
-  const rows = ledgerToRows(cls, sampleLedger(cls).ledger);
+  const rows = ledgerToRows(ROSTERS[cls], sampleLedger(cls).ledger);
   assert.equal(rows[1][2], "מזהה");
   assert.equal(rows[2][2], ROSTERS[cls][0].id);
 });
@@ -1124,8 +1131,8 @@ test("הגיליון נושא עמודת מזהה", () => {
 test("גיליון ישן בלי עמודת מזהה עדיין נקרא לפי שם", () => {
   const cls = "ט׳";
   const { ids, ledger } = sampleLedger(cls);
-  const old = ledgerToRows(cls, ledger).map((r, i) => (i < 2 ? r : [r[0], r[1], "", ""]));
-  const back = rowsToLedger(cls, old);
+  const old = ledgerToRows(ROSTERS[cls], ledger).map((r, i) => (i < 2 ? r : [r[0], r[1], "", ""]));
+  const back = rowsToLedger(ROSTERS[cls], old);
   ids.forEach((id) => assert.equal(back.plays[id], ledger.plays[id]));
   assert.deepEqual(back.pairs, ledger.pairs);
 });
@@ -1139,7 +1146,7 @@ test("שינוי שם תלמיד לא מאבד היסטוריה בגיליון �
     ["סמואל", 7, "", ""],
     ["דניאל", 4, "", ""],
   ];
-  const back = rowsToLedger(cls, rows);
+  const back = rowsToLedger(ROSTERS[cls], rows);
   assert.equal(back.plays["סמואל-כהן אוריה"], 7, "ההיסטוריה של אוריה אבדה");
   assert.equal(back.plays["דניאל-סלומון"], 4, "ההיסטוריה של דני אבדה");
 });
@@ -1163,7 +1170,7 @@ test("שם קודם לא גובר על שם קיים", () => {
         [name, 9, "", ""],
       ];
       const owner = ROSTERS[cls].find((s) => s.name === name);
-      assert.equal(rowsToLedger(cls, rows).plays[owner.id], 9, `${name} שויך לתלמיד הלא נכון`);
+      assert.equal(rowsToLedger(ROSTERS[cls], rows).plays[owner.id], 9, `${name} שויך לתלמיד הלא נכון`);
     });
   });
 });
@@ -1171,9 +1178,9 @@ test("שם קודם לא גובר על שם קיים", () => {
 test("שורה בגיליון שאין לה מקבילה ברשימה לא מזייפת צירופים", () => {
   const cls = "ט׳";
   const { ids, ledger } = sampleLedger(cls);
-  const rows = ledgerToRows(cls, ledger);
+  const rows = ledgerToRows(ROSTERS[cls], ledger);
   rows[2] = ["מישהו אחר", 99, "לא-קיים", ""]; // התלמיד הראשון הוחלף
-  const back = rowsToLedger(cls, rows);
+  const back = rowsToLedger(ROSTERS[cls], rows);
   assert.equal(back.plays["לא-קיים"], undefined);
   assert.equal(back.pairs[pairKey(ids[0], ids[3])], undefined, "צירוף שויך לתלמיד הלא נכון");
   assert.equal(back.pairs[pairKey(ids[1], ids[2])], 2, "צירוף תקין נפגע");
@@ -1182,16 +1189,151 @@ test("שורה בגיליון שאין לה מקבילה ברשימה לא מז�
 test("שם שהשתנה בגיליון לא מאבד היסטוריה — המזהה מנצח (רגרסיה)", () => {
   const cls = "ט׳";
   const { ids, ledger } = sampleLedger(cls);
-  const rows = ledgerToRows(cls, ledger);
+  const rows = ledgerToRows(ROSTERS[cls], ledger);
   // שם התצוגה של תלמיד משתנה מעצמו ברגע שנוסף עוד תלמיד עם אותו שם פרטי,
   // ואז השורה בגיליון כבר לא תואמת בשם. עמודת המזהה היא שמצילה אותה.
   const i = rows.findIndex((r) => r[2] === ids[3]);
   rows[i] = ["שם ישן שלא קיים ברשימה", rows[i][1], ids[3], ""];
-  const back = rowsToLedger(cls, rows);
+  const back = rowsToLedger(ROSTERS[cls], rows);
   assert.equal(back.plays[ids[3]], ledger.plays[ids[3]], "ההיסטוריה אבדה");
   assert.equal(back.pairs[pairKey(ids[0], ids[3])], 7, "הצירוף אבד");
 });
 
 test("לשונית ריקה מחזירה פנקס ריק", () => {
-  assert.deepEqual(rowsToLedger("ט׳", []), EMPTY);
+  assert.deepEqual(rowsToLedger(ROSTERS["ט׳"], []), EMPTY);
+});
+
+/* ==================== הרשימה כנתון (גיליון ועריכה) ==================== */
+
+test("הרשימה עוברת לגיליון וחוזרת בלי לאבד דבר", () => {
+  CLASSES.forEach((cls) => {
+    const back = rowsToRoster(rosterToRows(SEED[cls]));
+    assert.equal(back.length, SEED[cls].length, cls);
+    SEED[cls].forEach(([first, last, inst, id, backup = []], i) => {
+      assert.deepEqual(back[i], [first, last, inst, id, backup], `${cls}: ${first}`);
+    });
+  });
+});
+
+test("רשימה שחזרה מהגיליון בונה בדיוק את אותם תלמידים", () => {
+  CLASSES.forEach((cls) => {
+    const built = buildRoster(rowsToRoster(rosterToRows(SEED[cls])));
+    assert.deepEqual(
+      built.map((s) => [s.id, s.name, s.instruments, s.backup]),
+      ROSTERS[cls].map((s) => [s.id, s.name, s.instruments, s.backup]),
+      cls
+    );
+  });
+});
+
+test("שורות ריקות ורווחים בגיליון לא יוצרים תלמידי רפאים", () => {
+  const rows = [
+    ["שם פרטי", "שם משפחה", "כלי", "כלי משני", "מזהה"],
+    ["  דנה ", " לוי ", " חליל ", "", " דנה-לוי "],
+    ["", "", "", "", ""],
+    [],
+    ["רן", "", "תופים, פסנתר", "בס", "רן"],
+  ];
+  const list = rowsToRoster(rows);
+  assert.equal(list.length, 2, "שורות ריקות נספרו כתלמידים");
+  assert.deepEqual(list[0], ["דנה", "לוי", ["חליל"], "דנה-לוי", []]);
+  assert.deepEqual(list[1], ["רן", "", ["תופים", "פסנתר"], "רן", ["בס"]]);
+});
+
+test("מזהה חדש ייחודי, וגם כששני תלמידים באותו שם", () => {
+  const list = [...SEED["ט׳"]];
+  const id = makeId("אילה", "אוריין", SEED["י״א"]);
+  assert.equal(id, "אילה-אוריין", "מזהה פנוי שונה שלא לצורך");
+  const dup = makeId("אילה", "אוריין", [...list, ["אילה", "אוריין", ["חליל"], "אילה-אוריין"]]);
+  assert.notEqual(dup, "אילה-אוריין");
+  assert.ok(!list.some((r) => r[3] === dup));
+  assert.equal(makeId("רן", "", []), "רן", "שם משפחה ריק השאיר מקף");
+});
+
+test("מזהה של תלמיד קיים לא משתנה כששמו משתנה", () => {
+  /* המזהה הוא כל ההיסטוריה. עריכת שם היא פעולה נפרדת מיצירת מזהה,
+     ולכן makeId לא נקרא בה — הבדיקה מוודאת שהצורה תומכת בזה. */
+  const [, last, inst, id] = SEED["ט׳"][0];
+  const renamed = ["שם חדש", last, inst, id];
+  const built = buildRoster([renamed]);
+  assert.equal(built[0].id, id, "שינוי שם שינה את המזהה");
+  assert.equal(built[0].name, "שם חדש");
+});
+
+test("בעיות ברשימה מדווחות כולן יחד, ולא אחת בכל פעם", () => {
+  const bad = [
+    ["", "כהן", ["חליל"], "ריק"],
+    ["דנה", "לוי", [], "דנה-לוי"],
+    ["רן", "כהן", ["תופים"], "כפול"],
+    ["שי", "מור", ["בס"], "כפול"],
+    ["גל", "בר", ["פסנתר"], "גל-בר", ["פסנתר"]],
+  ];
+  const out = rosterProblems(bad);
+  assert.ok(out.some((m) => m.includes("אין שם פרטי")), out.join(" | "));
+  assert.ok(out.some((m) => m.includes("אין כלי")), out.join(" | "));
+  assert.ok(out.some((m) => m.includes("מזהה כפול")), out.join(" | "));
+  assert.ok(out.some((m) => m.includes("גם כראשי וגם כמשני")), out.join(" | "));
+  assert.ok(out.length >= 4, "לא כל הבעיות דווחו יחד");
+});
+
+test("כיתה שחסר בה תפקיד חיוני מדווחת בעריכה, לא בשיעור", () => {
+  const noDrums = SEED["ט׳"].filter((r) => !r[2].includes("תופים"));
+  const out = rosterProblems(noDrums);
+  assert.ok(out.some((m) => m.includes("מתופפים")), out.join(" | "));
+  assert.deepEqual(rosterProblems(SEED["ט׳"]), [], "כיתה תקינה דווחה כבעייתית");
+  assert.deepEqual(rosterProblems(SEED["י״א"]), []);
+});
+
+test("כלי שאינו ברשימת הכלים המוכרים עדיין עובד, כמלודי", () => {
+  /* מורה שמוסיף קלרינט לא אמור להיתקע. כלי לא מוכר נחשב מלודי ולא ייחודי,
+     ולכן הוא משתלב בלי שינוי קוד. */
+  const list = [
+    ...SEED["ט׳"].filter((r) => r[2][0] !== "חליל"),
+    ["נועה", "קלר", ["קלרינט"], "נועה-קלר"],
+  ];
+  assert.ok(!INSTRUMENTS.includes("קלרינט"));
+  assert.deepEqual(rosterProblems(list), []);
+  const roster = buildRoster(list);
+  const added = roster.find((s) => s.id === "נועה-קלר");
+  assert.deepEqual(added.roles, ["melody"]);
+  const d = bestDraw([...roster, TEACHER], capacity([...roster, TEACHER]).rec, EMPTY);
+  assert.ok(d, "כיתה עם כלי לא מוכר לא התחלקה");
+});
+
+test("הפנקס עובד מול רשימה שנערכה, ולא מול רשימה קבועה", () => {
+  /* זה מה שמאפשר לרשום כיתה חדשה: הפונקציות מקבלות את הרשימה כפרמטר
+     במקום לחפש אותה בטבלה סטטית. */
+  const edited = buildRoster([
+    ...SEED["ט׳"],
+    ["חדשה", "חדשה", ["חצוצרה"], "חדשה-חדשה"],
+  ]);
+  const ledger = { plays: { "חדשה-חדשה": 3, "ניב-כנען": 5 }, pairs: {}, lessons: 2 };
+  const back = rowsToLedger(edited, ledgerToRows(edited, ledger));
+  assert.equal(back.plays["חדשה-חדשה"], 3, "תלמיד חדש לא נשמר בגיליון");
+  assert.equal(back.plays["ניב-כנען"], 5);
+  assert.equal(back.lessons, 2);
+  const { ledger: restored } = decodeLedger("ט׳", edited, encodeLedger("ט׳", edited, ledger));
+  assert.equal(restored.plays["חדשה-חדשה"], 3, "תלמיד חדש לא שרד גיבוי");
+});
+
+test("assignIds משלים רק למי שחסר, ולא נוגע במזהה קיים", () => {
+  const list = [
+    ["דנה", "לוי", ["חליל"], "מזהה-ותיק"],
+    ["גל", "בר", ["פסנתר"], "גל-בר"],
+    ["רן", "כהן", ["תופים"], ""],
+    ["רן", "כהן", ["בס"], ""],
+  ];
+  const out = assignIds(list);
+  assert.equal(out[0][3], "מזהה-ותיק", "מזהה קיים שונה — היסטוריה נמחקה");
+  assert.ok(out[2][3] && out[3][3], "לא הושלם מזהה");
+  assert.notEqual(out[2][3], out[3][3], "שני תלמידים בשם זהה קיבלו אותו מזהה");
+  assert.deepEqual(rosterProblems(out), [], rosterProblems(out).join(" | "));
+});
+
+test("תלמיד חדש בעריכה אינו נחשב שגוי לפני שנשמר (רגרסיה)", () => {
+  /* העורך אימת את הטיוטה לפני השלמת המזהה, ולכן כל תלמיד שנוסף דווח
+     כ"אין מזהה" וכפתור השמירה נשאר נעול — אי אפשר היה להוסיף תלמיד בכלל. */
+  const draft = [...SEED["ט׳"], ["נועה", "קלר", ["קלרינט"], "", []]];
+  assert.ok(rosterProblems(draft).some((m) => m.includes("אין מזהה")), "הטיוטה הגולמית תקינה?");
+  assert.deepEqual(rosterProblems(assignIds(draft)), [], "תלמיד חדש עדיין חוסם שמירה");
 });

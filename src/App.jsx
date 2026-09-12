@@ -1,11 +1,17 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import * as Sheets from "./sheets.js";
+import RosterEditor from "./RosterEditor.jsx";
+import { C, TINT, btn, ghost } from "./theme.js";
 import {
   CLASSES,
   KEYS,
   TABS,
   TEACHER,
-  ROSTERS,
+  SEED,
+  buildRoster,
+  ROSTER_TAB,
+  rowsToRoster,
+  rosterToRows,
   ROLE_LABEL,
   EMPTY,
   applyLesson,
@@ -67,6 +73,20 @@ function loadAbsent(cls) {
 }
 const saveAbsent = (cls, ids) => store.set(ABSENT_KEY(cls), JSON.stringify({ d: todayStamp(), ids }));
 
+/* רשימת הכיתה. מקור האמת הוא הגיליון; המטמון המקומי הוא מה שמאפשר
+   לפתוח את האפליקציה בכיתה בלי רשת. בהתקנה ראשונה נופלים ל-SEED. */
+const ROSTER_KEY = (cls) => `ens-roster-${TABS[cls]}`;
+
+function loadRosterList(cls) {
+  try {
+    const r = store.get(ROSTER_KEY(cls));
+    const o = r ? JSON.parse(r.value) : null;
+    if (Array.isArray(o) && o.length) return o;
+  } catch {}
+  return SEED[cls];
+}
+const saveRosterList = (cls, list) => store.set(ROSTER_KEY(cls), JSON.stringify(list));
+
 /* יומן הנוכחות נשמר גם מקומית, כדי ששיעור לא ילך לאיבוד כשאין רשת */
 function loadAtt(cls) {
   try {
@@ -79,20 +99,7 @@ function loadAtt(cls) {
 }
 const saveAtt = (cls, log) => store.set(ATT_KEY(cls), JSON.stringify(log));
 
-/* ============================ עיצוב ============================ */
-
-const C = {
-  bg: "#161320",
-  panel: "#211D2E",
-  soft: "#2A2539",
-  line: "#3A3350",
-  ink: "#F3EFE7",
-  dim: "#A79FBD",
-  brass: "#E3A84C",
-  teal: "#63B7A6",
-  rose: "#D4737E",
-};
-const TINT = { "תופים": C.rose, "בס": C.teal, "פסנתר": C.brass, "גיטרה": C.brass };
+/* ============================ תצוגה ============================ */
 
 function Chip({ m, load, onClick, state }) {
   const tint = m.teacher ? C.teal : TINT[m.playing] || C.dim;
@@ -150,7 +157,11 @@ function Chip({ m, load, onClick, state }) {
 
 export default function App() {
   const [cls, setCls] = useState(CLASSES[0]);
-  const roster = ROSTERS[cls];
+  /* הרשימה היא state ולא קבוע: היא נערכת בממשק ומסונכרנת עם הגיליון.
+     buildRoster נגזר ממנה, ולכן שמות התצוגה מתעדכנים מיד עם העריכה. */
+  const [rosterList, setRosterList] = useState(() => loadRosterList(CLASSES[0]));
+  const roster = useMemo(() => buildRoster(rosterList), [rosterList]);
+  const [showRoster, setShowRoster] = useState(false);
   const [teacherOn, setTeacherOn] = useState(true);
   const [absent, setAbsent] = useState(() => new Set(loadAbsent(CLASSES[0])));
   const present = useMemo(() => roster.filter((s) => !absent.has(s.id)), [roster, absent]);
@@ -184,6 +195,8 @@ export default function App() {
   const [gMsg, setGMsg] = useState("");
   const [gBusy, setGBusy] = useState(false);
   const ledgerRef = useRef(ledger);
+  // pull רץ מתוך effect ולכן רואה ערכים ישנים; ref מחזיק את הנוכחי
+  const rosterRef = useRef(rosterList);
 
   /* כשנבחר נגן, מסמנים מראש עם מי מותר להחליף אותו. עדיף להראות את זה
      על המסך מאשר לתת למורה ללחוץ ולקבל סירוב. */
@@ -225,10 +238,16 @@ export default function App() {
   }, [ledger]);
 
   useEffect(() => {
+    rosterRef.current = rosterList;
+  }, [rosterList]);
+
+  useEffect(() => {
     setKPick(null);
     setLessonBase(null);
     setAbsentAtDraw(null);
     setAttLog(loadAtt(cls));
+    setRosterList(loadRosterList(cls));
+    setShowRoster(false);
     setAbsent(new Set(loadAbsent(cls)));
     setRes(null);
     setSaved(false);
@@ -323,15 +342,33 @@ export default function App() {
       if (!Sheets.connected()) return;
       setGBusy(true);
       try {
+        /* הרשימה נקראת ראשונה: הפנקס והנוכחות מפוענחים מולה, ואם נקרא
+           אותם מול רשימה ישנה תלמיד חדש ייראה כאילו אינו קיים. */
+        let list = rosterRef.current;
+        try {
+          const rrows = await Sheets.readRows(ROSTER_TAB(cls), 5);
+          const fromSheet = rowsToRoster(rrows);
+          if (fromSheet.length) {
+            list = fromSheet;
+            setRosterList(fromSheet);
+            saveRosterList(cls, fromSheet);
+          } else {
+            // לשונית ריקה — מעלים את מה שיש במקום להישאר בלי רשימה
+            await Sheets.writeRows(ROSTER_TAB(cls), rosterToRows(list), 5);
+          }
+        } catch {
+          // אין לשונית תלמידים (גיליון מגרסה קודמת) — ממשיכים עם המקומית
+        }
+        const localRoster = buildRoster(list);
         const rows = await Sheets.readRows(TABS[cls]);
         const local = ledgerRef.current;
         // לשונית ריקה בגיליון ופנקס מקומי קיים — מעלים את המקומי במקום למחוק אותו
         if (!rows.length && local.lessons > 0) {
-          await Sheets.writeRows(TABS[cls], ledgerToRows(cls, local));
+          await Sheets.writeRows(TABS[cls], ledgerToRows(localRoster, local));
           setGMsg(`הפנקס המקומי הועלה לגיליון · ${local.lessons} שיעורים`);
           return;
         }
-        const next = rowsToLedger(cls, rows);
+        const next = rowsToLedger(localRoster, rows);
         setLedger(next);
         setLessonBase(null);
         try {
@@ -418,7 +455,7 @@ export default function App() {
     if (Sheets.connected()) {
       setGBusy(true);
       try {
-        await Sheets.writeRows(TABS[cls], ledgerToRows(cls, next));
+        await Sheets.writeRows(TABS[cls], ledgerToRows(roster, next));
         await Sheets.writeRows(ATT_TAB(cls), attToRows(log), 5);
         setGMsg(`נשמר בגיליון · ${next.lessons} שיעורים${summary ? " · " + summary : ""}`);
       } catch (e) {
@@ -444,7 +481,7 @@ export default function App() {
     store.set(KEYS[cls], JSON.stringify(back));
     if (Sheets.connected()) {
       try {
-        await Sheets.writeRows(TABS[cls], ledgerToRows(cls, back));
+        await Sheets.writeRows(TABS[cls], ledgerToRows(roster, back));
         await Sheets.writeRows(ATT_TAB(cls), attToRows(log), 5);
         setGMsg(`השמירה בוטלה · ${back.lessons} שיעורים`);
       } catch (e) {
@@ -452,6 +489,31 @@ export default function App() {
       }
     } else {
       setGMsg(`השמירה בוטלה · ${back.lessons} שיעורים`);
+    }
+  };
+
+  /* שמירת רשימה ערוכה. הרשימה נשמרת מיד — במכשיר ובגיליון — כי היא
+     לא חלק מהשיעור אלא נתון הכיתה, ואיבוד שלה עולה הרבה יותר מאיבוד
+     חלוקה אחת. החלוקה הנוכחית מתבטלת, כי היא נשענה על הרשימה הישנה. */
+  const saveRoster = async (list) => {
+    setRosterList(list);
+    saveRosterList(cls, list);
+    setShowRoster(false);
+    setRes(null);
+    setSaved(false);
+    setDrawErr("");
+    setLiveMsg("");
+    setSel(null);
+    if (!Sheets.connected()) return setGMsg(`הרשימה נשמרה במכשיר · ${list.length} תלמידים`);
+    setGBusy(true);
+    try {
+      await Sheets.writeRows(ROSTER_TAB(cls), rosterToRows(list), 5);
+      setGMsg(`הרשימה נשמרה בגיליון · ${list.length} תלמידים`);
+    } catch (e) {
+      setGOn(Sheets.connected());
+      setGMsg("הרשימה נשמרה במכשיר אבל לא בגיליון — " + e.message);
+    } finally {
+      setGBusy(false);
     }
   };
 
@@ -465,7 +527,7 @@ export default function App() {
     store.set(KEYS[cls], JSON.stringify(EMPTY));
     if (Sheets.connected()) {
       try {
-        await Sheets.writeRows(TABS[cls], ledgerToRows(cls, EMPTY));
+        await Sheets.writeRows(TABS[cls], ledgerToRows(roster, EMPTY));
         await Sheets.writeRows(ATT_TAB(cls), attToRows([]), 5);
         setGMsg("הפנקס ויומן הנוכחות אופסו גם בגיליון");
       } catch (e) {
@@ -473,18 +535,6 @@ export default function App() {
       }
     }
   };
-
-  const btn = (bg, fg) => ({
-    background: bg,
-    color: fg,
-    border: "none",
-    borderRadius: 10,
-    padding: "11px 18px",
-    fontSize: 16,
-    fontWeight: 600,
-    cursor: "pointer",
-    fontFamily: "inherit",
-  });
 
   const ledgerRows = useMemo(
     () =>
@@ -564,9 +614,17 @@ export default function App() {
             {gBusy ? "מסנכרן…" : gOn ? "● גיליון" : "○ גיליון"}
           </button>
           <button
+            onClick={() => setShowRoster((v) => !v)}
+            aria-expanded={showRoster}
+            style={{ ...ghost(), padding: "8px 12px", fontSize: 14 }}
+            title="הוספה, עריכה והסרה של תלמידים — לתחילת שנה"
+          >
+            {showRoster ? "סגור רשימה" : "רשימת הכיתה"}
+          </button>
+          <button
             onClick={() => setShowHelp(!showHelp)}
             aria-expanded={showHelp}
-            style={{ ...btn("transparent", C.dim), border: `1px solid ${C.line}`, padding: "8px 12px", fontSize: 14, marginRight: "auto" }}
+            style={{ ...ghost(), padding: "8px 12px", fontSize: 14, marginRight: "auto" }}
           >
             איך זה עובד?
           </button>
@@ -589,6 +647,18 @@ export default function App() {
           </div>
         )}
       </div>
+
+      {showRoster && (
+        <div style={{ maxWidth: 760, margin: "0 auto" }}>
+          <RosterEditor
+            cls={cls}
+            list={rosterList}
+            busy={gBusy}
+            onSave={saveRoster}
+            onCancel={() => setShowRoster(false)}
+          />
+        </div>
+      )}
 
       {/* הנוכחות היא השלב שלפני החלוקה, ולכן היא פתוחה כל עוד אין תוצאה
           וכפתור החלוקה יושב בסופה. ברגע שיש חלוקה היא מתקפלת לשורה אחת. */}
@@ -818,7 +888,7 @@ export default function App() {
             <button
               onClick={() => {
                 setNote("");
-                setTransfer(transfer === null ? encodeLedger(cls, ledger) : null);
+                setTransfer(transfer === null ? encodeLedger(cls, roster, ledger) : null);
               }}
               style={{ ...btn("transparent", C.dim), border: `1px solid ${C.line}` }}
             >
@@ -873,7 +943,7 @@ export default function App() {
               <button
                 onClick={async () => {
                   try {
-                    const { ledger: next, dropped, added } = decodeLedger(cls, transfer.trim());
+                    const { ledger: next, dropped, added } = decodeLedger(cls, roster, transfer.trim());
                     setLedger(next);
                     setLessonBase(null);
                     setRes(null);

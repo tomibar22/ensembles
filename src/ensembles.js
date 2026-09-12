@@ -1,9 +1,17 @@
 /* לוגיקת החלוקה, בלי React ובלי דפדפן — כדי שאפשר יהיה לבדוק אותה ישירות
    ב-`npm test`. כל מה שנוגע ל-localStorage ולתצוגה נשאר ב-App.jsx. */
 
-/* ============================ נתוני התלמידים ============================ */
+/* ====================== רשימת התלמידים — זרע ראשוני ======================
 
-const RAW = {
+   זו הרשימה שממנה האפליקציה מתחילה בפעם הראשונה בלבד. מקור האמת הוא
+   הגיליון (לשונית "תלמידים <כיתה>"), ואפשר לערוך אותה מתוך האפליקציה —
+   כי בכל ספטמבר נכנסים תלמידים חדשים, ולערוך קוד ולדחוף ל-git זה לא
+   דבר שמורה אמור לעשות.
+
+   שורה: ["שם פרטי", "שם משפחה", ["כלי ראשי"], "מזהה", ["כלי משני"]]
+   ================================================================== */
+
+const SEED = {
   "י״א": [
     ["מעיין", "אלפר", ["תופים"], "מעיין-אלפר"],
     ["נועם", "בנימיני", ["תופים"], "נועם-בנימיני"],
@@ -50,7 +58,7 @@ const ROLE_OF = { "תופים": "drums", "בס": "bass", "פסנתר": "harmony"
 const UNIQUE = new Set(["תופים", "בס", "פסנתר", "גיטרה"]);
 const ORDER = ["תופים", "בס", "פסנתר", "גיטרה", "חצוצרה", "טרומבון", "אלט", "טנור", "חליל", "שירה"];
 const orderOf = (i) => (ORDER.indexOf(i) === -1 ? 99 : ORDER.indexOf(i));
-const CLASSES = Object.keys(RAW);
+const CLASSES = Object.keys(SEED);
 const KEYS = { "ט׳": "ens-ledger-g9", "י״א": "ens-ledger-g11" };
 const TABS = { "ט׳": "g9", "י״א": "g11" }; // לשוניות בגיליון
 /* תלמיד לא ינגן ביותר משני הרכבים באותו שיעור — אלא אם אין ברירה:
@@ -61,6 +69,12 @@ const MAX_LOAD = 2;
 /* ארבעת התפקידים שכל הרכב חייב: תופים, בס, כלי הרמוני וכלי מלודי.
    מהם נגזר גם גודל ההרכב המינימלי — פחות מארבעה נגנים אינו הרכב. */
 const REQUIRED = ["drums", "bass", "harmony", "melody"];
+const ROLE_LABEL = {
+  drums: "מתופפים",
+  bass: "בסיסטים",
+  harmony: "כלים הרמוניים",
+  melody: "כלים מלודיים",
+};
 const MIN_GROUP = REQUIRED.length;
 const MAX_GROUP = 7; // מעבר לזה כבר לא באמת מנגנים יחד, רק יושבים
 const MAX_GROUPS = 5; // יותר מזה לא מנוהל בשיעור אחד
@@ -94,7 +108,130 @@ function buildRoster(list) {
   if (ids.size !== roster.length) throw new Error("יש מזהה כפול ברשימת התלמידים");
   return roster;
 }
-const ROSTERS = Object.fromEntries(Object.entries(RAW).map(([k, v]) => [k, buildRoster(v)]));
+/* הרשימות של הזרע. מי שלא חיבר גיליון עדיין עובד מולן. */
+const ROSTERS = Object.fromEntries(Object.entries(SEED).map(([k, v]) => [k, buildRoster(v)]));
+
+/* מי יכול למלא תפקיד חיוני. כלי משני הוא רזרבה: הוא נכנס רק כשאין אף
+   נוכח שזה כליו הראשי — כלומר בחיסור, ולא כדי להקל על מי שכן נוכח. */
+const forRole = (pool, role) => {
+  const primary = pool.filter((s) => s.roles.includes(role));
+  return primary.length ? primary : pool.filter((s) => (s.backupRoles || []).includes(role));
+};
+
+/* התפקידים החיוניים שאין להם אף נגן נוכח — הדבר היחיד שחוסם חלוקה לגמרי.
+   נגן אחד בתפקיד מספיק לכמה הרכבים שצריך, ולכן מספר הנגנים בתפקיד אינו
+   מגביל את מספר ההרכבים; רק תפקיד ריק לגמרי חוסם.
+   שתי הפונקציות האלה עולות לכאן, לפני הבדיקה שמשתמשת בהן: ערך שנקרא
+   לפני שהוגדר הוא הדפוס שכבר הפיל את האפליקציה יותר מפעם אחת. */
+const emptyRoles = (pool) => REQUIRED.filter((r) => !forRole(pool, r).length);
+
+/* =================== הרשימה כנתון: גיליון ועריכה ===================
+
+   הרשימה חיה בלשונית "תלמידים <כיתה>" בגיליון, ונערכת גם מתוך
+   האפליקציה. הצורה הפנימית זהה לזו של SEED, כדי שיהיה מקור אמת אחד
+   לצורת הנתון ו-buildRoster יעבוד על שניהם. */
+
+const ROSTER_TAB = (cls) => `תלמידים ${cls}`;
+const ROSTER_HEAD = ["שם פרטי", "שם משפחה", "כלי", "כלי משני", "מזהה"];
+
+/* הכלים המוכרים, לבורר בממשק. כלי שאינו ברשימה עדיין עובד — הוא נחשב
+   מלודי ולא ייחודי — ולכן אפשר להוסיף כלי חדש בלי לגעת בקוד. */
+const INSTRUMENTS = ORDER;
+
+const splitInst = (v) =>
+  String(v || "")
+    .split(/[,،]/)
+    .map((x) => x.trim())
+    .filter(Boolean);
+
+/** שורות הגיליון → רשימה בצורת SEED */
+function rowsToRoster(rows) {
+  return (rows || [])
+    .slice(1)
+    .filter((r) => r && (String(r[0] || "").trim() || String(r[4] || "").trim()))
+    .map((r) => [
+      String(r[0] || "").trim(),
+      String(r[1] || "").trim(),
+      splitInst(r[2]),
+      String(r[4] || "").trim(),
+      splitInst(r[3]),
+    ]);
+}
+
+/** רשימה בצורת SEED → שורות הגיליון */
+function rosterToRows(list) {
+  return [
+    ROSTER_HEAD,
+    ...list.map(([first, last, inst, id, backup = []]) => [
+      first,
+      last || "",
+      (inst || []).join(", "),
+      (backup || []).join(", "),
+      id,
+    ]),
+  ];
+}
+
+/**
+ * מזהה לתלמיד חדש. המזהה הוא המפתח של כל ההיסטוריה ואין לשנות אותו
+ * אחר כך, ולכן הוא נוצר פעם אחת — כאן — ומוודא ייחודיות מול הרשימה.
+ */
+function makeId(first, last, list) {
+  const taken = new Set(list.map((r) => r[3]).filter(Boolean));
+  const base = `${String(first).trim()}-${String(last || "").trim()}`.replace(/-$/, "");
+  if (!taken.has(base)) return base;
+  for (let n = 2; ; n++) if (!taken.has(`${base}-${n}`)) return `${base}-${n}`;
+}
+
+/**
+ * משלים מזהה לכל שורה שאין לה — ורק לה.
+ *
+ * לתלמיד חדש אין מזהה עד שהוא נשמר, ולתלמיד קיים המזהה הוא כל ההיסטוריה
+ * שלו ואין לגעת בו לעולם. שתי הדרישות האלה חיות באותה פונקציה כדי שלא
+ * ייווצר מסלול שמחדש מזהה לתלמיד קיים בטעות.
+ */
+function assignIds(list) {
+  return list.reduce((acc, row) => {
+    const [first, last, inst, id, backup = []] = row;
+    const name = String(first || "").trim();
+    return [...acc, [name, String(last || "").trim(), inst || [], id || makeId(name, last, acc), backup]];
+  }, []);
+}
+
+/**
+ * מה לא תקין ברשימה. מוחזר כרשימת הודעות ולא כזריקה, כדי שהממשק יוכל
+ * להראות את כולן יחד — מורה שמזין כיתה שלמה לא אמור לגלות שגיאה אחת
+ * בכל פעם.
+ */
+function rosterProblems(list) {
+  const out = [];
+  const seen = new Map();
+  list.forEach(([first, , inst, id, backup = []], i) => {
+    const where = String(first || "").trim() || `שורה ${i + 1}`;
+    if (!String(first || "").trim()) out.push(`שורה ${i + 1}: אין שם פרטי`);
+    if (!(inst || []).length) out.push(`${where}: אין כלי`);
+    if (!id) out.push(`${where}: אין מזהה`);
+    else if (seen.has(id)) out.push(`${where}: מזהה כפול עם ${seen.get(id)}`);
+    else seen.set(id, where);
+    (backup || []).forEach((b) => {
+      if ((inst || []).includes(b)) out.push(`${where}: ${b} מופיע גם כראשי וגם כמשני`);
+    });
+  });
+  /* הרכב חייב תופים, בס, כלי הרמוני וכלי מלודי — כיתה שאין בה אחד מהם
+     לא תוכל להתחלק כלל, ועדיף לומר את זה בעריכה מאשר בשיעור.
+     נבנה רק ממה שתקין: buildRoster זורק על מזהה כפול, ובדיקה שקורסת
+     במקום לדווח הייתה מסתירה מהמורה את שאר הבעיות ברשימה. */
+  const clean = [];
+  const used = new Set();
+  list.forEach((r) => {
+    if (r[3] && !used.has(r[3]) && (r[2] || []).length) (used.add(r[3]), clean.push(r));
+  });
+  if (clean.length)
+    emptyRoles(buildRoster(clean)).forEach((r) =>
+      out.push(`אין בכיתה אף ${ROLE_LABEL[r]} — אי אפשר יהיה לחלק`)
+    );
+  return out;
+}
 
 /* שמות תצוגה קודמים של תלמידים ששמם שונה. משמש רק כשקוראים גיליון
    שנכתב לפני שנוספה עמודת המזהה — שם הזיהוי הוא לפי שם, ובלי המיפוי
@@ -123,13 +260,6 @@ const instFor = (s, role) => {
   if (role === "bass") return "בס";
   // הרמוני ומלודי — הכלי הראשון של התלמיד שממלא את התפקיד
   return [...s.instruments, ...(s.backup || [])].find((i) => (ROLE_OF[i] || "melody") === role);
-};
-
-/* מי יכול למלא תפקיד חיוני. כלי משני הוא רזרבה: הוא נכנס רק כשאין אף
-   נוכח שזה כליו הראשי — כלומר בחיסור, ולא כדי להקל על מי שכן נוכח. */
-const forRole = (pool, role) => {
-  const primary = pool.filter((s) => s.roles.includes(role));
-  return primary.length ? primary : pool.filter((s) => (s.backupRoles || []).includes(role));
 };
 
 /**
@@ -602,8 +732,8 @@ function applyLesson(roster, res, base) {
 /* ייצוא/ייבוא הפנקס כטקסט קצר, כדי לשמור אותו איפה שנוח.
    גרסה 2 נושאת את המזהים עצמם ולא רק מספרים לפי סדר, ולכן הגיבוי שורד
    הוספה או הסרה של תלמידים מהרשימה. גרסה 1 הייתה לפי מיקום בלבד. */
-function encodeLedger(cls, ledger) {
-  const ids = ROSTERS[cls].map((s) => s.id);
+function encodeLedger(cls, roster, ledger) {
+  const ids = roster.map((s) => s.id);
   const p = ids.map((id) => ledger.plays[id] || 0);
   const x = Object.entries(ledger.pairs)
     .map(([key, n]) => {
@@ -617,10 +747,10 @@ function encodeLedger(cls, ledger) {
 
 /** מחזיר { ledger, dropped, added } — dropped/added כדי שנוכל להגיד למשתמש
     מה קרה במקום לשנות לו את ההיסטוריה בשקט */
-function decodeLedger(cls, text) {
+function decodeLedger(cls, roster, text) {
   const o = JSON.parse(text);
   if (o.c !== cls) throw new Error("הפנקס שייך לכיתה " + o.c);
-  const list = ROSTERS[cls];
+  const list = roster;
   const known = new Set(list.map((s) => s.id));
   // גיבוי ישן (v1) לא נשא מזהים — נקרא לפי סדר הרשימה הנוכחית, כמו קודם
   const src = Array.isArray(o.s) ? o.s : list.map((s) => s.id);
@@ -650,8 +780,8 @@ function decodeLedger(cls, text) {
    A2: כותרות, ומשורה 3: שם תלמיד | כמה הרכבים | מזהה
    הצירופים דחוסים לפי מיקום השורה, ועמודת המזהה היא שמפרשת את המיקומים —
    בלעדיה הוספת תלמיד באמצע הרשימה הייתה מזיזה לכולם את ההיסטוריה. */
-function ledgerToRows(cls, ledger) {
-  const list = ROSTERS[cls];
+function ledgerToRows(roster, ledger) {
+  const list = roster;
   const ids = list.map((s) => s.id);
   const pairs = Object.entries(ledger.pairs)
     .map(([key, n]) => {
@@ -667,9 +797,9 @@ function ledgerToRows(cls, ledger) {
   ];
 }
 
-function rowsToLedger(cls, rows) {
+function rowsToLedger(roster, rows) {
   if (!rows.length) return { plays: {}, pairs: {}, lessons: 0 };
-  const list = ROSTERS[cls];
+  const list = roster;
   const known = new Set(list.map((s) => s.id));
   const byName = Object.fromEntries(list.map((s) => [s.name, s.id]));
   const lessons = Number(rows[0] && rows[0][1]) || 0;
@@ -756,21 +886,18 @@ function capacity(pool) {
   return { max, rec, options: opts };
 }
 
-const ROLE_LABEL = {
-  drums: "מתופפים",
-  bass: "בסיסטים",
-  harmony: "כלים הרמוניים",
-  melody: "כלים מלודיים",
-};
-
-/* התפקידים החיוניים שאין להם אף נגן נוכח — הדבר היחיד שחוסם חלוקה לגמרי.
-   נגן אחד בתפקיד מספיק לכמה הרכבים שצריך, ולכן מספר הנגנים בתפקיד אינו
-   מגביל את מספר ההרכבים; רק תפקיד ריק לגמרי חוסם. */
-const emptyRoles = (pool) => REQUIRED.filter((r) => !forRole(pool, r).length);
 
 export {
-  RAW,
+  SEED,
   ROSTERS,
+  ROSTER_TAB,
+  ROSTER_HEAD,
+  INSTRUMENTS,
+  rowsToRoster,
+  rosterToRows,
+  makeId,
+  assignIds,
+  rosterProblems,
   CLASSES,
   KEYS,
   TABS,
