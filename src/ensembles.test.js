@@ -38,6 +38,7 @@ import {
   INSTRUMENTS,
   rowsToRoster,
   rosterToRows,
+  byInstrument,
   makeId,
   assignIds,
   rosterProblems,
@@ -1474,4 +1475,57 @@ test("רישום של תלמיד שכבר לא ברשימה לא מופיע ול
   const out = attendanceSummary(roster, log, { plays: {}, pairs: {}, lessons: 5 });
   assert.equal(out.length, roster.length);
   assert.ok(!out.some((e) => e.id === "מי-שעזב"));
+});
+
+/* ==================== קיבוץ לפי כלי (לוח הנוכחות) ==================== */
+
+test("הקיבוץ יוצא בסדר התווים", () => {
+  const out = byInstrument(ROSTERS["י״א"]).map((g) => g.instrument);
+  const expected = ORDER.filter((i) => out.includes(i));
+  assert.deepEqual(out, expected, "הקבוצות לא בסדר של ORDER");
+  // הריתמיקה קודמת, ובתוך המלודיים מהנמוך לגבוה
+  assert.deepEqual(out.slice(0, 4), ["תופים", "בס", "פסנתר", "גיטרה"]);
+  assert.ok(out.indexOf("טרומבון") < out.indexOf("טנור"));
+  assert.ok(out.indexOf("טנור") < out.indexOf("אלט"));
+  assert.ok(out.indexOf("אלט") < out.indexOf("חצוצרה"));
+  assert.ok(out.indexOf("חצוצרה") < out.indexOf("שירה"));
+});
+
+test("הקיבוץ מכסה כל תלמיד בדיוק פעם אחת", () => {
+  CLASSES.forEach((cls) => {
+    const roster = ROSTERS[cls];
+    const ids = byInstrument(roster).flatMap((g) => g.students.map((s) => s.id));
+    assert.equal(ids.length, roster.length, `${cls}: מספר התלמידים השתנה`);
+    assert.equal(new Set(ids).size, ids.length, `${cls}: תלמיד הופיע פעמיים`);
+    roster.forEach((s) => assert.ok(ids.includes(s.id), `${cls}: ${s.name} נעלם מהלוח`));
+  });
+});
+
+test("כל תלמיד מופיע תחת הכלי שלו", () => {
+  byInstrument(ROSTERS["י״א"]).forEach(({ instrument, students }) =>
+    students.forEach((s) =>
+      assert.equal(s.instruments[0], instrument, `${s.name} שויך ל${instrument}`)
+    )
+  );
+});
+
+test("כלי שאינו מוכר מופיע בסוף ולא נעלם", () => {
+  /* מורה שהוסיף קלרינט חייב לראות את התלמיד שלו בלוח הנוכחות. */
+  const roster = buildRoster([
+    ...SEED["ט׳"],
+    ["נועה", "קלר", ["קלרינט"], "נועה-קלר"],
+    ["עמית", "דרור", ["אבוב"], "עמית-דרור"],
+  ]);
+  const out = byInstrument(roster);
+  const names = out.map((g) => g.instrument);
+  assert.ok(names.includes("קלרינט") && names.includes("אבוב"), "כלי לא מוכר נעלם");
+  // הלא־מוכרים בסוף, וביניהם לפי א״ב עברי: אבוב לפני קלרינט
+  assert.equal(names.indexOf("אבוב"), names.length - 2, "הלא־מוכרים לא בסוף");
+  assert.equal(names.indexOf("קלרינט"), names.length - 1);
+  // ושניים לא מוכרים לא מתמזגים לקבוצה אחת
+  assert.equal(out.find((g) => g.instrument === "קלרינט").students.length, 1);
+});
+
+test("כיתה ריקה לא מפילה את הקיבוץ", () => {
+  assert.deepEqual(byInstrument([]), []);
 });

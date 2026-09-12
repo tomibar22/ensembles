@@ -56,7 +56,21 @@ const SEED = {
 
 const ROLE_OF = { "תופים": "drums", "בס": "bass", "פסנתר": "harmony", "גיטרה": "harmony" };
 const UNIQUE = new Set(["תופים", "בס", "פסנתר", "גיטרה"]);
-const ORDER = ["תופים", "בס", "פסנתר", "גיטרה", "חצוצרה", "טרומבון", "אלט", "טנור", "חליל", "שירה"];
+/* סדר התווים: קודם הריתמיקה, ואחריה הכלים המלודיים מהנמוך לגבוה.
+   משמש גם לסידור הנגנים בתוך הרכב וגם לחלוקת לוח הנוכחות לפי כלים,
+   כדי שהעין תמצא כלי באותו מקום בשני המסכים. */
+const ORDER = [
+  "תופים",
+  "בס",
+  "פסנתר",
+  "גיטרה",
+  "טרומבון",
+  "טנור",
+  "אלט",
+  "חצוצרה",
+  "חליל",
+  "שירה",
+];
 const orderOf = (i) => (ORDER.indexOf(i) === -1 ? 99 : ORDER.indexOf(i));
 const CLASSES = Object.keys(SEED);
 const KEYS = { "ט׳": "ens-ledger-g9", "י״א": "ens-ledger-g11" };
@@ -143,6 +157,29 @@ const splitInst = (v) =>
     .split(/[,،]/)
     .map((x) => x.trim())
     .filter(Boolean);
+
+/**
+ * התלמידים מקובצים לפי כלי, בסדר התווים — כמו מפתחות בפרטיטורה.
+ * ברשימה של 22 שמות רצופים המורה מחפש שם; מקובץ לפי כלי הוא סורק קבוצה.
+ *
+ * כלי שאינו ב-ORDER אינו נעלם אלא מופיע בסוף: מורה שהוסיף קלרינט חייב
+ * לראות את התלמיד שלו בלוח הנוכחות.
+ */
+function byInstrument(roster) {
+  const groups = new Map();
+  roster.forEach((s) => {
+    const inst = s.instruments[0] || "";
+    if (!groups.has(inst)) groups.set(inst, []);
+    groups.get(inst).push(s);
+  });
+  return [...groups.entries()]
+    .map(([instrument, students]) => ({ instrument, students }))
+    .sort(
+      (a, b) =>
+        orderOf(a.instrument) - orderOf(b.instrument) ||
+        a.instrument.localeCompare(b.instrument, "he")
+    );
+}
 
 /** שורות הגיליון → רשימה בצורת SEED */
 function rowsToRoster(rows) {
@@ -1002,6 +1039,7 @@ export {
   INSTRUMENTS,
   rowsToRoster,
   rosterToRows,
+  byInstrument,
   makeId,
   assignIds,
   rosterProblems,

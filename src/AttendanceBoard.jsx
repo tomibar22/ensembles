@@ -1,4 +1,4 @@
-import { ROLE_LABEL } from "./ensembles.js";
+import { ROLE_LABEL, byInstrument } from "./ensembles.js";
 import { C, TINT, btn, ghost } from "./theme.js";
 
 const WRAP = {
@@ -64,39 +64,64 @@ export default function AttendanceBoard({
       <div style={{ color: C.dim, fontSize: 13, marginBottom: 12, lineHeight: 1.5 }}>
         לחץ על מי שלא הגיע. נעדר לא נכנס לחלוקה ולא צובר הרכבים, ולכן תהיה לו עדיפות בשיעור הבא.
       </div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-        {roster.map((s) => {
-          const out = absent.has(s.id);
+      {/* מקובץ לפי כלי, בסדר התווים. שם הכלי עבר מ-22 קפסולות לתשע
+          כותרות — הקפסולות צרות יותר, והעין סורקת קבוצה במקום לחפש שם. */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {byInstrument(roster).map(({ instrument, students }) => {
+          const tint = TINT[instrument] || C.dim;
+          const missing = students.filter((s) => absent.has(s.id)).length;
           return (
-            <button
-              key={s.id}
-              onClick={() => onToggle(s.id)}
-              aria-pressed={out}
-              style={{
-                display: "flex",
-                // center ולא baseline: עם minHeight, baseline מצמיד
-                // את הטקסט לראש הקפסולה במקום למרכז אותה
-                alignItems: "center",
-                justifyContent: "center",
-                gap: 6,
-                minHeight: 44, // מטרת מגע נוחה באצבע
-                padding: "0 14px",
-                borderRadius: 999,
-                cursor: "pointer",
-                fontFamily: "inherit",
-                fontSize: 16,
-                background: out ? "transparent" : "rgba(255,255,255,0.06)",
-                border: `1px solid ${out ? C.line : C.teal + "66"}`,
-                color: out ? C.dim : C.ink,
-                textDecoration: out ? "line-through" : "none",
-                opacity: out ? 0.65 : 1,
-              }}
-            >
-              {s.name}
-              <span style={{ color: out ? C.dim : TINT[s.instruments[0]] || C.dim, fontSize: 13 }}>
-                {s.instruments[0]}
-              </span>
-            </button>
+            <div key={instrument} style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+              <div
+                style={{
+                  flex: "0 0 58px",
+                  textAlign: "start",
+                  color: tint,
+                  fontSize: 13,
+                  // מיושר לאמצע הקפסולה הראשונה בשורה, לא לראשה
+                  lineHeight: "44px",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {instrument}
+                {/* כל הקבוצה חסרה — זה מה שמסכן את החלוקה, ולכן מסומן */}
+                {missing === students.length && (
+                  <span style={{ color: C.rose, marginInlineStart: 4 }}>·</span>
+                )}
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, flex: 1, minWidth: 0 }}>
+                {students.map((s) => {
+                  const out = absent.has(s.id);
+                  return (
+                    <button
+                      key={s.id}
+                      onClick={() => onToggle(s.id)}
+                      aria-pressed={out}
+                      style={{
+                        display: "flex",
+                        // center ולא baseline: עם minHeight, baseline מצמיד
+                        // את הטקסט לראש הקפסולה במקום למרכז אותה
+                        alignItems: "center",
+                        justifyContent: "center",
+                        minHeight: 44, // מטרת מגע נוחה באצבע
+                        padding: "0 13px",
+                        borderRadius: 999,
+                        cursor: "pointer",
+                        fontFamily: "inherit",
+                        fontSize: 16,
+                        background: out ? "transparent" : "rgba(255,255,255,0.06)",
+                        border: `1px solid ${out ? C.line : tint + "66"}`,
+                        color: out ? C.dim : C.ink,
+                        textDecoration: out ? "line-through" : "none",
+                        opacity: out ? 0.65 : 1,
+                      }}
+                    >
+                      {s.name}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           );
         })}
       </div>
