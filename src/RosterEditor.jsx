@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { INSTRUMENTS, assignIds, rosterProblems } from "./ensembles.js";
+import { INSTRUMENTS, SEED, assignIds, rosterProblems } from "./ensembles.js";
 import { C, btn, ghost, field, panel } from "./theme.js";
 
 /**
@@ -29,8 +29,18 @@ export default function RosterEditor({ cls, list, onSave, onCancel, busy }) {
   const setInst = (i, col, v) =>
     edit(i, (row) => ((row[col] = v.trim() ? [v.trim()] : []), row));
 
-  const add = () =>
-    setDraft((d) => [...d, ["", "", [], "", []]]);
+  const add = () => setDraft((d) => [...d, ["", "", [], "", []]]);
+
+  /* שחזור לרשימה המקורית של הכיתה.
+     קיים בשביל מצב שבו הרשימה התקלקלה — למשל סנכרון שכתב לכיתה אחת את
+     הרשימה של השנייה — ואז הקלדה ידנית של כיתה שלמה היא עונש מיותר.
+     דורש אישור, כי הוא מוחק עריכות אמיתיות. */
+  const restore = () => {
+    const original = SEED[cls] || [];
+    if (!original.length) return setNote("אין רשימה מקורית לכיתה הזאת");
+    setDraft(original.map((r) => [...r]));
+    setNote(`הוחזרה הרשימה המקורית — ${original.length} תלמידים. לחץ "שמור" כדי לאשר.`);
+  };
 
   const remove = (i) => {
     const [first, , , id] = draft[i];
@@ -130,9 +140,18 @@ export default function RosterEditor({ cls, list, onSave, onCancel, busy }) {
         ))}
       </div>
 
-      <button onClick={add} style={{ ...ghost(C.teal), marginTop: 10, fontSize: 15 }}>
-        + הוסף תלמיד
-      </button>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+        <button onClick={add} style={{ ...ghost(C.teal), fontSize: 15 }}>
+          + הוסף תלמיד
+        </button>
+        <button
+          onClick={restore}
+          style={{ ...ghost(), fontSize: 15 }}
+          title={`מחזיר את ${draft.length ? "" : ""}רשימת כיתה ${cls} המקורית, אם הרשימה הנוכחית התקלקלה`}
+        >
+          שחזר רשימה מקורית
+        </button>
+      </div>
 
       {problems.length > 0 && (
         <ul style={{ color: C.rose, fontSize: 14, lineHeight: 1.7, margin: "12px 0 0", paddingInlineStart: 20 }}>
