@@ -40,8 +40,11 @@ git checkout <branch>
 - `src/ensembles.js` — כל הלוגיקה, בלי React ובלי דפדפן. **כל לוגיקה חדשה
   שייכת לכאן**, כדי שתהיה ניתנת לבדיקה ישירה.
 - `src/ensembles.test.js` — הבדיקות, כולל רגרסיות לבאגים שכבר תוקנו.
-- `src/App.jsx` — תצוגה, נוכחות, מטמון מקומי.
-- `src/RosterEditor.jsx` — עריכת רשימת הכיתה.
+- `src/App.jsx` — המצב, הסנכרון וההרכבה. **לא מקום ל-JSX חדש** —
+  מסך חדש הוא קובץ חדש.
+- `src/AttendanceBoard.jsx` — "מי כאן היום?" · `src/Groups.jsx` — ההרכבים
+  והספסל (כולל `Chip`) · `src/TrackPanel.jsx` — מעקב וציונים ·
+  `src/RosterEditor.jsx` — רשימת הכיתה.
 - `src/theme.js` — הפלטה ועוזרי הסגנון. **אין להגדיר צבע בתוך רכיב.**
 - `src/sheets.js` — Google Sheets. `src/ErrorBoundary.jsx` — במקום מסך לבן.
 
