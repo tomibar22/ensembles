@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { useState, useReducer, useEffect, useMemo, useCallback, useRef } from "react";
 import * as Sheets from "./sheets.js";
 import RosterEditor from "./RosterEditor.jsx";
 import { C, TINT, btn, ghost, panel } from "./theme.js";
@@ -156,13 +156,64 @@ function Chip({ m, load, onClick, state }) {
   );
 }
 
+/* ============================ מצב השיעור ============================
+
+   שבעה ערכים שתמיד השתנו יחד: החלוקה, האם נשמרה, הפנקס שלפניה, תמונת
+   הנוכחות ברגע החלוקה, השגיאה, ההודעה והנגן שנבחר להחלפה. כל מסלול היה
+   צריך לזכור את כל חמשת ה-setters, ומסלול ששכח אחד מהם השאיר על המסך
+   הודעה או בחירה ממצב קודם.
+
+   reducer הופך כל שינוי למעבר אחד בעל שם, ולכן אי אפשר לשכוח חצי ממנו.
+   ================================================================== */
+
+const NO_LESSON = { res: null, saved: false, base: null, atDraw: null, err: "", msg: "", sel: null };
+
+function lessonReducer(st, a) {
+  switch (a.type) {
+    // כיתה אחרת, רשימה שנערכה, או פנקס שנטען — הכול מתחיל מחדש
+    case "reset":
+      return NO_LESSON;
+    // החלוקה יורדת מהמסך, אבל השיעור עצמו נמשך (הפנקס שלפניו נשמר)
+    case "cleared":
+      return { ...st, res: null, saved: false, err: "", msg: "", sel: null };
+    case "drew":
+      return {
+        ...st,
+        res: a.res,
+        err: a.err,
+        saved: false,
+        msg: "",
+        sel: null,
+        // תמונת הנוכחות נלקחת בחלוקה הראשונה ונשמרת גם בחלוקה חוזרת,
+        // אחרת חלוקה מחדש הייתה מוחקת את רישום האיחורים
+        atDraw: st.atDraw || a.atDraw,
+      };
+    // עריכה ידנית, או מי שהגיע/יצא באמצע — החלוקה משתנה בלי להיבנות מחדש
+    case "edit":
+      return { ...st, res: a.res ?? st.res, saved: false, err: "", msg: a.msg || "", sel: null };
+    case "msg":
+      return { ...st, msg: a.msg };
+    case "select":
+      return { ...st, sel: a.sel, msg: a.sel ? "" : st.msg };
+    case "saved":
+      return { ...st, saved: true, base: a.base };
+    case "undone":
+      return { ...st, saved: false, base: null };
+    // הפנקס נמשך מהגיליון: השיעור שבזיכרון כבר לא יושב על אותו בסיס
+    case "rebased":
+      return { ...st, base: null, saved: false };
+    default:
+      return st;
+  }
+}
+
 export default function App() {
   const [cls, setCls] = useState(CLASSES[0]);
   /* הרשימה היא state ולא קבוע: היא נערכת בממשק ומסונכרנת עם הגיליון.
      buildRoster נגזר ממנה, ולכן שמות התצוגה מתעדכנים מיד עם העריכה. */
   const [rosterList, setRosterList] = useState(() => loadRosterList(CLASSES[0]));
   const roster = useMemo(() => buildRoster(rosterList), [rosterList]);
-  const [showRoster, setShowRoster] = useState(false);
+
   const [teacherOn, setTeacherOn] = useState(true);
   const [absent, setAbsent] = useState(() => new Set(loadAbsent(CLASSES[0])));
   const present = useMemo(() => roster.filter((s) => !absent.has(s.id)), [roster, absent]);
@@ -174,27 +225,27 @@ export default function App() {
   const [kPick, setKPick] = useState(null); // null = ללכת אחרי ההמלצה
   const k = kPick === null ? caps.rec : Math.min(kPick, caps.max);
   const [ledger, setLedger] = useState(EMPTY);
-  const [res, setRes] = useState(null);
-  const [saved, setSaved] = useState(false);
-  const [showLedger, setShowLedger] = useState(false);
+  const [lesson, dispatch] = useReducer(lessonReducer, NO_LESSON);
+  const { res, saved, base: lessonBase, atDraw: absentAtDraw, err: drawErr, msg: liveMsg, sel } = lesson;
+
+  /* ארבעת המסכים הנוספים אינם יכולים להיות פתוחים יחד, ולכן הם ערך אחד
+     ולא ארבעה בוליאנים שצריך לזכור לכבות זה את זה. */
+  const [panelOpen, setPanelOpen] = useState(null); // roster | track | help | transfer
+  const toggle = (name) => setPanelOpen((cur) => (cur === name ? null : name));
+
   const [showRoll, setShowRoll] = useState(false); // רק כדי לפתוח כשכבר יש חלוקה
   // הנוכחות פתוחה כל עוד אין חלוקה על המסך; אחריה היא מתקפלת לשורת סיכום
   const rollOpen = !res || showRoll;
 
-  const [drawErr, setDrawErr] = useState("");
-  const [liveMsg, setLiveMsg] = useState("");
-  const [sel, setSel] = useState(null); // הנגן שנבחר להחלפה ידנית: { g, id }
-  const [showHelp, setShowHelp] = useState(false);
-  // הפנקס כפי שהיה לפני שהשיעור הזה נשמר — הבסיס לשמירה חוזרת ולביטול
-  const [lessonBase, setLessonBase] = useState(null);
-  // מי סומן חסר ברגע החלוקה. ההשוואה מולו בסוף השיעור היא שמזהה איחורים.
-  const [absentAtDraw, setAbsentAtDraw] = useState(null);
   const [attLog, setAttLog] = useState([]);
   const [transfer, setTransfer] = useState(null); // טקסט הפנקס לייצוא/ייבוא
   const [note, setNote] = useState("");
-  const [gOn, setGOn] = useState(Sheets.connected());
-  const [gMsg, setGMsg] = useState("");
-  const [gBusy, setGBusy] = useState(false);
+  // מצב הסנכרון: מחובר, הודעה אחרונה, ועסוק — שלושתם משתנים יחד
+  const [sync, setSync] = useState({ on: Sheets.connected(), msg: "", busy: false });
+  const { on: gOn, msg: gMsg, busy: gBusy } = sync;
+  const setGMsg = (msg) => setSync((v) => ({ ...v, msg }));
+  const setGBusy = (busy) => setSync((v) => ({ ...v, busy }));
+  const setGOn = (on) => setSync((v) => ({ ...v, on }));
   const ledgerRef = useRef(ledger);
   // pull רץ מתוך effect ולכן רואה ערכים ישנים; ref מחזיק את הנוכחי
   const rosterRef = useRef(rosterList);
@@ -218,21 +269,15 @@ export default function App() {
     return swapOk && swapOk.has(`${g}|${id}`) ? "idle" : "blocked";
   };
   const pickChip = (g, m) => {
-    if (!sel) {
-      setSel({ g, id: m.id });
-      setLiveMsg("");
-      return;
-    }
-    if (sel.g === g && sel.id === m.id) {
-      setSel(null);
-      return;
-    }
+    if (!sel) return dispatch({ type: "select", sel: { g, id: m.id } });
+    if (sel.g === g && sel.id === m.id) return dispatch({ type: "select", sel: null });
     const out = swapPlayers(res, sel, { g, id: m.id });
-    if (out.error) return setLiveMsg(out.error);
-    setRes({ groups: out.groups, load: out.load, bench: out.bench });
-    setSel(null);
-    setSaved(false);
-    setLiveMsg(`${out.moved[0]} ו${out.moved[1]} הוחלפו.`);
+    if (out.error) return dispatch({ type: "msg", msg: out.error });
+    dispatch({
+      type: "edit",
+      res: { groups: out.groups, load: out.load, bench: out.bench },
+      msg: `${out.moved[0]} ו${out.moved[1]} הוחלפו.`,
+    });
   };
   useEffect(() => {
     ledgerRef.current = ledger;
@@ -244,17 +289,11 @@ export default function App() {
 
   useEffect(() => {
     setKPick(null);
-    setLessonBase(null);
-    setAbsentAtDraw(null);
     setAttLog(loadAtt(cls));
     setRosterList(loadRosterList(cls));
-    setShowRoster(false);
+    setPanelOpen(null);
     setAbsent(new Set(loadAbsent(cls)));
-    setRes(null);
-    setSaved(false);
-    setDrawErr("");
-    setLiveMsg("");
-    setSel(null);
+    dispatch({ type: "reset" });
     let alive = true;
     (async () => {
       let l = EMPTY;
@@ -268,9 +307,7 @@ export default function App() {
   }, [cls]);
 
   useEffect(() => {
-    setRes(null);
-    setSaved(false);
-    setDrawErr("");
+    dispatch({ type: "cleared" });
   }, [teacherOn]);
 
   /* מישהו הגיע באיחור או יצא באמצע. אין סיבה לפרק הרכבים שכבר מנגנים —
@@ -281,11 +318,8 @@ export default function App() {
     leaving ? next.add(id) : next.delete(id);
     setAbsent(next);
     saveAbsent(cls, [...next]);
-    setSaved(false);
-    setDrawErr("");
-    setSel(null);
 
-    if (!res) return setLiveMsg("");
+    if (!res) return dispatch({ type: "cleared" });
     const student = roster.find((s) => s.id === id);
     const gapText = (broken) =>
       broken
@@ -298,12 +332,13 @@ export default function App() {
       const stillHere = roster.filter((sd) => !next.has(sd.id));
       const nextPool = teacherOn ? [...stillHere, TEACHER] : stillHere;
       const out = repairDraw(removeFromDraw(res, id), nextPool, ledger);
-      setRes(out);
       const fixes = out.filled
         .map((f) => `${f.name} נכנס ב${f.instrument} להרכב ${f.group + 1}`)
         .join(", ");
-      setLiveMsg(
-        [
+      dispatch({
+        type: "edit",
+        res: out,
+        msg: [
           `${student.name} יצא מהחלוקה.`,
           fixes && `${fixes} — כדי שלכל הרכב תישאר ריתמיקה מלאה.`,
           // כשאי אפשר להשלים, אומרים גם מה כן אפשרי — אחרת ההודעה מתארת
@@ -312,29 +347,28 @@ export default function App() {
             `${gapText(out.unfixable)}, ואין מי שימלא — עם ${stillHere.length} הנוכחים אפשר עד ${capacity(nextPool).max} הרכבים.`,
         ]
           .filter(Boolean)
-          .join(" ")
-      );
+          .join(" "),
+      });
     } else {
       const added = addToDraw(res, student, ledger);
-      if (!added) {
-        setLiveMsg(`אין כיסא פנוי ל${student.name} (${student.instruments[0]}) באף הרכב — צריך לחלק מחדש.`);
-        return;
-      }
-      setRes(added);
+      if (!added)
+        return dispatch({
+          type: "msg",
+          msg: `אין כיסא פנוי ל${student.name} (${student.instruments[0]}) באף הרכב — צריך לחלק מחדש.`,
+        });
       const left = removeFromDraw(added, "").broken;
-      setLiveMsg(
-        `${student.name} הצטרף להרכב ${added.joined + 1}.` + (left.length ? ` ${gapText(left)}.` : "")
-      );
+      dispatch({
+        type: "edit",
+        res: added,
+        msg: `${student.name} הצטרף להרכב ${added.joined + 1}.` + (left.length ? ` ${gapText(left)}.` : ""),
+      });
     }
   };
 
   const clearAbsent = () => {
     setAbsent(new Set());
     saveAbsent(cls, []);
-    setRes(null);
-    setSaved(false);
-    setDrawErr("");
-    setLiveMsg("");
+    dispatch({ type: "cleared" });
   };
 
   // משיכה מהגיליון: מקור האמת. localStorage נשאר כמטמון לשיעור בלי רשת.
@@ -371,7 +405,7 @@ export default function App() {
         }
         const next = rowsToLedger(localRoster, rows);
         setLedger(next);
-        setLessonBase(null);
+        dispatch({ type: "rebased" });
         try {
           const log = rowsToAtt(await Sheets.readRows(ATT_TAB(cls), 5));
           setAttLog(log);
@@ -410,20 +444,18 @@ export default function App() {
 
   const draw = useCallback(() => {
     const r = bestDraw(pool, k, ledger);
-    setRes(r);
-    setSaved(false);
-    setLiveMsg("");
-    setSel(null);
-    // תמונת הנוכחות נלקחת בחלוקה הראשונה של השיעור ונשמרת גם אם מחלקים
-    // מחדש — אחרת חלוקה חוזרת הייתה מוחקת את רישום האיחורים
-    if (r && !absentAtDraw) setAbsentAtDraw(new Set(absent));
     if (r) setShowRoll(false);
-    setDrawErr(
-      r
+    dispatch({
+      type: "drew",
+      res: r,
+      // תמונת הנוכחות נלקחת בחלוקה הראשונה בלבד; ה-reducer שומר עליה
+      // בחלוקה חוזרת, אחרת רישום האיחורים היה נמחק
+      atDraw: r ? new Set(absent) : null,
+      err: r
         ? ""
-        : `אי אפשר להרכיב ${k} הרכבים מ-${pool.length} הנוכחים — בכל הרכב חייבים תופים, בס, כלי הרמוני וכלי מלודי. נסה פחות הרכבים, או בדוק את הנוכחות.`
-    );
-  }, [pool, k, ledger, absent, absentAtDraw]);
+        : `אי אפשר להרכיב ${k} הרכבים מ-${pool.length} הנוכחים — בכל הרכב חייבים תופים, בס, כלי הרמוני וכלי מלודי. נסה פחות הרכבים, או בדוק את הנוכחות.`,
+    });
+  }, [pool, k, ledger, absent]);
 
   const save = async () => {
     if (!res) return;
@@ -431,9 +463,8 @@ export default function App() {
     // חלוקה מחדש ושמירה נוספת היו סופרים שיעור אחד כשניים.
     const base = lessonBase || ledger;
     const next = applyLesson(roster, res, base);
-    setLessonBase(base);
     setLedger(next);
-    setSaved(true);
+    dispatch({ type: "saved", base });
     store.set(KEYS[cls], JSON.stringify(next));
 
     /* יומן הנוכחות: חיסורים, איחורים ומי שיצא באמצע. נבנה מהשוואה בין
@@ -475,8 +506,7 @@ export default function App() {
     const back = lessonBase;
     const log = attLog.filter((e) => e.lesson !== ledger.lessons);
     setLedger(back);
-    setLessonBase(null);
-    setSaved(false);
+    dispatch({ type: "undone" });
     setAttLog(log);
     saveAtt(cls, log);
     store.set(KEYS[cls], JSON.stringify(back));
@@ -499,12 +529,8 @@ export default function App() {
   const saveRoster = async (list) => {
     setRosterList(list);
     saveRosterList(cls, list);
-    setShowRoster(false);
-    setRes(null);
-    setSaved(false);
-    setDrawErr("");
-    setLiveMsg("");
-    setSel(null);
+    setPanelOpen(null);
+    dispatch({ type: "cleared" });
     if (!Sheets.connected()) return setGMsg(`הרשימה נשמרה במכשיר · ${list.length} תלמידים`);
     setGBusy(true);
     try {
@@ -520,11 +546,9 @@ export default function App() {
 
   const reset = async () => {
     setLedger(EMPTY);
-    setLessonBase(null);
-    setAbsentAtDraw(null);
     setAttLog([]);
     saveAtt(cls, []);
-    setSaved(false);
+    dispatch({ type: "reset" });
     store.set(KEYS[cls], JSON.stringify(EMPTY));
     if (Sheets.connected()) {
       try {
@@ -620,24 +644,24 @@ export default function App() {
             {gBusy ? "מסנכרן…" : gOn ? "● גיליון" : "○ גיליון"}
           </button>
           <button
-            onClick={() => setShowLedger((v) => !v)}
-            aria-expanded={showLedger}
+            onClick={() => toggle("track")}
+            aria-expanded={panelOpen === "track"}
             style={{ ...ghost(), padding: "8px 12px", fontSize: 14 }}
             title="הרכבים, נוכחות, חיסורים ואיחורים לכל תלמיד"
           >
-            {showLedger ? "סגור מעקב" : "מעקב"}
+            {panelOpen === "track" ? "סגור מעקב" : "מעקב"}
           </button>
           <button
-            onClick={() => setShowRoster((v) => !v)}
-            aria-expanded={showRoster}
+            onClick={() => toggle("roster")}
+            aria-expanded={panelOpen === "roster"}
             style={{ ...ghost(), padding: "8px 12px", fontSize: 14 }}
             title="הוספה, עריכה והסרה של תלמידים — לתחילת שנה"
           >
-            {showRoster ? "סגור רשימה" : "רשימת הכיתה"}
+            {panelOpen === "roster" ? "סגור רשימה" : "רשימת הכיתה"}
           </button>
           <button
-            onClick={() => setShowHelp(!showHelp)}
-            aria-expanded={showHelp}
+            onClick={() => toggle("help")}
+            aria-expanded={panelOpen === "help"}
             style={{ ...ghost(), padding: "8px 12px", fontSize: 14, marginRight: "auto" }}
           >
             איך זה עובד?
@@ -652,7 +676,7 @@ export default function App() {
           </p>
         )}
 
-        {showHelp && (
+        {panelOpen === "help" && (
           <div style={{ color: C.dim, fontSize: 14, margin: "12px 0 0", lineHeight: 1.7, borderTop: `1px solid ${C.line}`, paddingTop: 12 }}>
             תופים, בס, כלי הרמוני וכלי מלודי בכל הרכב, ולכל היותר {MAX_GROUP} נגנים. מספר ההרכבים הוא הקטן ביותר שבו אף אחד
             לא יושב בחוץ — פחות הרכבים, יותר זמן נגינה לכל אחד. מי שנדרש ביותר מהרכב אחד מסומן במספר ההרכבים שלו, והפנקס
@@ -662,14 +686,14 @@ export default function App() {
         )}
       </div>
 
-      {showRoster && (
+      {panelOpen === "roster" && (
         <div style={{ maxWidth: 760, margin: "0 auto" }}>
           <RosterEditor
             cls={cls}
             list={rosterList}
             busy={gBusy}
             onSave={saveRoster}
-            onCancel={() => setShowRoster(false)}
+            onCancel={() => setPanelOpen(null)}
           />
         </div>
       )}
@@ -944,10 +968,7 @@ export default function App() {
                   try {
                     const { ledger: next, dropped, added } = decodeLedger(cls, roster, transfer.trim());
                     setLedger(next);
-                    setLessonBase(null);
-                    setRes(null);
-                    setSaved(false);
-                    setDrawErr("");
+                    dispatch({ type: "reset" });
                     const extra = [
                       dropped ? `${dropped} מהגיבוי כבר לא ברשימה` : "",
                       added ? `${added} תלמידים חדשים מתחילים מאפס` : "",
@@ -969,7 +990,7 @@ export default function App() {
           </section>
         )}
 
-        {showLedger && (
+        {panelOpen === "track" && (
           <section style={{ ...panel, marginTop: 12 }}>
             <div style={{ color: C.dim, fontSize: 14, marginBottom: 8 }}>
               {ledger.lessons} שיעורים בפנקס · מיון לפי
