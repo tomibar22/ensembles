@@ -1,4 +1,4 @@
-import { useState, useReducer, useEffect, useMemo, useCallback, useRef } from "react";
+import { useState, useReducer, useEffect, useMemo, useCallback } from "react";
 import * as Sheets from "./sheets.js";
 import RosterEditor from "./RosterEditor.jsx";
 import AttendanceBoard from "./AttendanceBoard.jsx";
@@ -89,6 +89,16 @@ function loadRosterList(cls) {
   return SEED[cls];
 }
 const saveRosterList = (cls, list) => store.set(ROSTER_KEY(cls), JSON.stringify(list));
+
+/* הפנקס מהמטמון המקומי. נטען לפי הכיתה ולא מ-state, כדי שהסנכרון
+   יוכל לקרוא אותו בלי לחכות לרנדר. */
+function loadLedger(cls) {
+  try {
+    const r = store.get(KEYS[cls]);
+    if (r) return { ...EMPTY, ...JSON.parse(r.value) };
+  } catch {}
+  return EMPTY;
+}
 
 /* יומן הנוכחות נשמר גם מקומית, כדי ששיעור לא ילך לאיבוד כשאין רשת */
 function loadAtt(cls) {
@@ -194,9 +204,7 @@ export default function App() {
   const setGMsg = (msg) => setSync((v) => ({ ...v, msg }));
   const setGBusy = (busy) => setSync((v) => ({ ...v, busy }));
   const setGOn = (on) => setSync((v) => ({ ...v, on }));
-  const ledgerRef = useRef(ledger);
-  // pull רץ מתוך effect ולכן רואה ערכים ישנים; ref מחזיק את הנוכחי
-  const rosterRef = useRef(rosterList);
+
 
   /* כשנבחר נגן, מסמנים מראש עם מי מותר להחליף אותו. עדיף להראות את זה
      על המסך מאשר לתת למורה ללחוץ ולקבל סירוב. */
@@ -228,30 +236,13 @@ export default function App() {
     });
   };
   useEffect(() => {
-    ledgerRef.current = ledger;
-  }, [ledger]);
-
-  useEffect(() => {
-    rosterRef.current = rosterList;
-  }, [rosterList]);
-
-  useEffect(() => {
     setKPick(null);
     setAttLog(loadAtt(cls));
     setRosterList(loadRosterList(cls));
     setPanelOpen(null);
     setAbsent(new Set(loadAbsent(cls)));
     dispatch({ type: "reset" });
-    let alive = true;
-    (async () => {
-      let l = EMPTY;
-      try {
-        const r = store.get(KEYS[cls]);
-        if (r) l = { ...EMPTY, ...JSON.parse(r.value) };
-      } catch {}
-      if (alive) setLedger(l);
-    })();
-    return () => (alive = false);
+    setLedger(loadLedger(cls));
   }, [cls]);
 
   useEffect(() => {
@@ -332,16 +323,29 @@ export default function App() {
   };
 
   // משיכה מהגיליון: מקור האמת. localStorage נשאר כמטמון לשיעור בלי רשת.
+  /**
+   * משיכה מהגיליון עבור כיתה אחת.
+   *
+   * `alive` אומר אם התוצאה עדיין רלוונטית: הסנכרון אסינכרוני, והמורה
+   * יכול להחליף כיתה באמצע. בלי הבדיקה הזאת תשובה שמגיעה באיחור הייתה
+   * נכתבת על הכיתה החדשה.
+   */
   const pull = useCallback(
-    async (silent) => {
+    async (silent, alive = () => true) => {
       if (!Sheets.connected()) return;
       setGBusy(true);
       try {
-        /* הרשימה נקראת ראשונה: הפנקס והנוכחות מפוענחים מולה, ואם נקרא
+        /* הרשימה והפנקס נטענים מהמטמון **לפי הכיתה שמסנכרנים**, ולא מ-ref.
+           ref מתעדכן ב-effect שרץ רק ברנדר הבא, ולכן ברגע החלפת כיתה הוא
+           עדיין החזיק את הכיתה הקודמת — וכך רשימת י״א נכתבה ללשונית
+           "תלמידים ט׳". loadRosterList תלויה ב-cls בלבד ואינה יכולה לפגר.
+
+           הרשימה נקראת ראשונה: הפנקס והנוכחות מפוענחים מולה, ואם נקרא
            אותם מול רשימה ישנה תלמיד חדש ייראה כאילו אינו קיים. */
-        let list = rosterRef.current;
+        let list = loadRosterList(cls);
         try {
           const rrows = await Sheets.readRows(ROSTER_TAB(cls), 5);
+          if (!alive()) return;
           const fromSheet = rowsToRoster(rrows);
           if (fromSheet.length) {
             list = fromSheet;
@@ -358,7 +362,8 @@ export default function App() {
         }
         const localRoster = buildRoster(list);
         const rows = await Sheets.readRows(TABS[cls]);
-        const local = ledgerRef.current;
+        if (!alive()) return;
+        const local = loadLedger(cls);
         // לשונית ריקה בגיליון ופנקס מקומי קיים — מעלים את המקומי במקום למחוק אותו
         if (!rows.length && local.lessons > 0) {
           await Sheets.writeRows(TABS[cls], ledgerToRows(localRoster, local));
@@ -370,6 +375,7 @@ export default function App() {
         dispatch({ type: "rebased" });
         try {
           const log = rowsToAtt(await Sheets.readRows(ATT_TAB(cls), 5));
+          if (!alive()) return;
           setAttLog(log);
           saveAtt(cls, log);
         } catch {
@@ -388,7 +394,13 @@ export default function App() {
   );
 
   useEffect(() => {
-    if (gOn) pull(true);
+    if (!gOn) return;
+    // כשמחליפים כיתה, הניקוי מסמן למשיכה שרצה שתוצאתה כבר לא רלוונטית
+    let on = true;
+    pull(true, () => on);
+    return () => {
+      on = false;
+    };
   }, [cls, gOn, pull]);
 
   const connect = async () => {

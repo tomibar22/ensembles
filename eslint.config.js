@@ -43,4 +43,14 @@ export default [
     files: ["src/**/*.test.js"],
     languageOptions: { globals: { ...globals.node } },
   },
+  /* בדיקות שרצות בדפדפן דרך playwright: קוד Node שמריץ, ובתוכו קטעים
+     שמוערכים בדף עצמו — ולכן שתי מערכות הגלובלים. */
+  {
+    files: ["scripts/**/*.mjs"],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: "module",
+      globals: { ...globals.node, ...globals.browser },
+    },
+  },
 ];

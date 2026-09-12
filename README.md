@@ -204,6 +204,18 @@ npm test      # בדיקות הלוגיקה
 npm run lint  # בדיקה סטטית
 ```
 
+### בדיקת הסנכרון מול הגיליון
+
+`npm test` לא מגיע למסלול הגיליון — הוא דורש דפדפן ו-OAuth. לכן יש בדיקה
+נפרדת מול גיליון מזויף, להרצה ידנית אחרי שינוי ב-`pull` או ב-`sheets.js`:
+
+```bash
+npm run build && npx vite preview --port 4173 &
+npm i --no-save playwright && node scripts/sheet-sync.check.mjs
+```
+
+היא נשמרת בנפרד כדי ש-`npm test` יישאר בלי שום תלות.
+
 ## מבנה
 
 - `src/ensembles.js` — הרשימה והלוגיקה: החלוקה, הפנקס, הגיבוי והמרות הגיליון.
