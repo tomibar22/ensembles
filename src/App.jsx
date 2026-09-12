@@ -340,7 +340,9 @@ export default function App() {
             await Sheets.writeRows(ROSTER_TAB(cls), rosterToRows(list), 5);
           }
         } catch {
-          // אין לשונית תלמידים (גיליון מגרסה קודמת) — ממשיכים עם המקומית
+          /* readRows יוצרת את הלשונית אם אינה קיימת, ולכן מגיעים לכאן רק
+             על כשל רשת או הרשאה. ממשיכים עם הרשימה המקומית: עדיף שיעור
+             עם רשימה מהמטמון מאשר אפליקציה שלא עולה. */
         }
         const localRoster = buildRoster(list);
         const rows = await Sheets.readRows(TABS[cls]);
