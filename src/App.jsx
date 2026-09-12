@@ -22,8 +22,8 @@ import {
   ROLE_MISSING,
   bestDraw,
   capacity,
-  PREFERRED_GROUPS,
-  bottleneck,
+  emptyRoles,
+  MAX_GROUP,
   encodeLedger,
   decodeLedger,
   ledgerToRows,
@@ -155,9 +155,9 @@ export default function App() {
   const [absent, setAbsent] = useState(() => new Set(loadAbsent(CLASSES[0])));
   const present = useMemo(() => roster.filter((s) => !absent.has(s.id)), [roster, absent]);
   const pool = useMemo(() => (teacherOn ? [...present, TEACHER] : present), [present, teacherOn]);
-  // ההעדפה תלויה בכיתה, ולכן נמסרת ל-capacity ולא יושבת בתוכה
-  const caps = useMemo(() => capacity(pool, PREFERRED_GROUPS[cls]), [pool, cls]);
-  const neck = useMemo(() => bottleneck(pool), [pool]);
+  const caps = useMemo(() => capacity(pool), [pool]);
+  // תפקיד חיוני שאין לו אף נגן נוכח — הדבר היחיד שחוסם חלוקה לגמרי
+  const gaps = useMemo(() => emptyRoles(pool), [pool]);
   // k נגזר ולא נשמר: כך הוא לא נשאר גדול מהאפשרי אחרי שסימנו נעדרים
   const [kPick, setKPick] = useState(null); // null = ללכת אחרי ההמלצה
   const k = kPick === null ? caps.rec : Math.min(kPick, caps.max);
@@ -273,7 +273,7 @@ export default function App() {
         .join(", ");
 
     if (leaving) {
-      // הכלל "תופים, בס וכלי הרמוני בכל הרכב" חייב להישמר גם עכשיו.
+      // הכלל "תופים, בס, כלי הרמוני וכלי מלודי בכל הרכב" חייב להישמר גם עכשיו.
       // מחשבים את הנוכחים מהסט החדש ולא מ-present, שעדיין מחזיק את מי שיצא.
       const stillHere = roster.filter((sd) => !next.has(sd.id));
       const nextPool = teacherOn ? [...stillHere, TEACHER] : stillHere;
@@ -383,7 +383,7 @@ export default function App() {
     setDrawErr(
       r
         ? ""
-        : `אי אפשר להרכיב ${k} הרכבים מ-${pool.length} הנוכחים — בכל הרכב חייבים תופים, בס וכלי הרמוני. נסה פחות הרכבים, או בדוק את הנוכחות.`
+        : `אי אפשר להרכיב ${k} הרכבים מ-${pool.length} הנוכחים — בכל הרכב חייבים תופים, בס, כלי הרמוני וכלי מלודי. נסה פחות הרכבים, או בדוק את הנוכחות.`
     );
   }, [pool, k, ledger, absent, absentAtDraw]);
 
@@ -526,10 +526,13 @@ export default function App() {
               onChange={(e) => setKPick(Number(e.target.value))}
               style={{ background: C.soft, color: C.ink, border: `1px solid ${C.line}`, borderRadius: 8, padding: "8px 9px", fontSize: 16, fontFamily: "inherit" }}
             >
-              {Array.from({ length: caps.max }, (_, i) => i + 1).map((n) => (
-                <option key={n} value={n}>
-                  {n}
-                  {n === caps.rec ? " · מומלץ" : ""}
+              {/* לכל מספר כתוב מה הוא אומר בפועל: גודל ההרכב, וכמה יישבו
+                  בחוץ. קודם היה כאן רק "מומלץ", בלי שום דרך לדעת למה. */}
+              {caps.options.map((o) => (
+                <option key={o.k} value={o.k}>
+                  {o.k} · {o.smallest === o.biggest ? `${o.biggest} נגנים` : `${o.smallest}–${o.biggest} נגנים`}
+                  {o.bench ? ` · ${o.bench} בחוץ` : ""}
+                  {o.k === caps.rec ? " · מומלץ" : ""}
                 </option>
               ))}
             </select>
@@ -579,8 +582,9 @@ export default function App() {
 
         {showHelp && (
           <div style={{ color: C.dim, fontSize: 14, margin: "12px 0 0", lineHeight: 1.7, borderTop: `1px solid ${C.line}`, paddingTop: 12 }}>
-            תופים, בס וכלי הרמוני בכל הרכב. מי שנדרש ביותר מהרכב אחד מסומן במספר ההרכבים שלו, והפנקס דואג שזה יתחלף בין
-            השיעורים. תומר נכנס להרכב אחד ואינו נספר בפנקס.
+            תופים, בס, כלי הרמוני וכלי מלודי בכל הרכב, ולכל היותר {MAX_GROUP} נגנים. מספר ההרכבים הוא הקטן ביותר שבו אף אחד
+            לא יושב בחוץ — פחות הרכבים, יותר זמן נגינה לכל אחד. מי שנדרש ביותר מהרכב אחד מסומן במספר ההרכבים שלו, והפנקס
+            דואג שזה יתחלף בין השיעורים. תומר נכנס להרכב אחד ואינו נספר בפנקס.
             {!ledger.lessons && " אחרי כל שיעור לחץ ״שמור״, וההגרלות הבאות יתקנו את מי שקופח."}
           </div>
         )}
@@ -639,7 +643,10 @@ export default function App() {
             {absent.size > 0 && (
               <p style={{ color: C.dim, fontSize: 13, margin: "12px 0 0", lineHeight: 1.6 }}>
                 {present.length} נוכחים · אפשר עד {caps.max} הרכבים
-                {neck.missing ? ` — אין ${ROLE_LABEL[neck.role]} נוכחים` : ""}.
+                {gaps.length
+                  ? ` — אין ${gaps.map((r) => ROLE_LABEL[r]).join(" ואין ")} נוכחים`
+                  : ""}
+                .
               </p>
             )}
             {/* דביק: ברשימה של 22 שמות הכפתור נפל מתחת לקיפול במסך טלפון */}

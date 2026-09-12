@@ -54,18 +54,16 @@ const CLASSES = Object.keys(RAW);
 const KEYS = { "ט׳": "ens-ledger-g9", "י״א": "ens-ledger-g11" };
 const TABS = { "ט׳": "g9", "י״א": "g11" }; // לשוניות בגיליון
 /* תלמיד לא ינגן ביותר משני הרכבים באותו שיעור — אלא אם אין ברירה:
-   הדרישה לתופים, בס וכלי הרמוני בכל הרכב גוברת. בסיסט יחיד בכיתה ינגן
+   הדרישה ל-REQUIRED בכל הרכב גוברת. בסיסט יחיד בכיתה ינגן
    בכל ההרכבים, כי אחרת חלקם יישארו בלי בס. ההקלה תקפה רק לתפקידים
    החיוניים; צירוף מלודי והעשרה לעולם לא יחרגו. */
 const MAX_LOAD = 2;
-const MAX_GROUP = 6; // מעבר לזה ההרכב כבר לא באמת מנגן
+/* ארבעת התפקידים שכל הרכב חייב: תופים, בס, כלי הרמוני וכלי מלודי.
+   מהם נגזר גם גודל ההרכב המינימלי — פחות מארבעה נגנים אינו הרכב. */
+const REQUIRED = ["drums", "bass", "harmony", "melody"];
+const MIN_GROUP = REQUIRED.length;
+const MAX_GROUP = 7; // מעבר לזה כבר לא באמת מנגנים יחד, רק יושבים
 const MAX_GROUPS = 5; // יותר מזה לא מנוהל בשיעור אחד
-/* כמה הרכבים עדיף לכיתה, כשזה אפשרי. גובר על "כמה שיותר" של capacity.
-   בי״א 22 תלמידים ב-4 הרכבים דורשים 25 כיסאות — שני בסיסטים ממלאים ארבעה
-   כיסאות ושלושה מתופפים ארבעה — כלומר הרכב אחד של 7. זה מועדף על 5 הרכבים,
-   שבהם בסיסט אחד נדרש לשלושה הרכבים, ופסנתר וגיטרה יוצאים יחד בפחות הרכבים. */
-const PREFERRED_GROUPS = { "י״א": 4 };
-const PREFER_SLACK = 1; // ההעדפה סופגת נגן אחד מעל MAX_GROUP, לא יותר
 const TEACHER = {
   id: "__teacher",
   name: "תומר",
@@ -120,12 +118,12 @@ const shuffle = (a0) => {
 const pairKey = (a, b) => (a < b ? `${a}|${b}` : `${b}|${a}`);
 /* הכלי שבו התלמיד ימלא את התפקיד. כולל כלים משניים, כי כשהם נכנסים
    לפעולה התלמיד מנגן בהם בפועל. */
-const instFor = (s, role) =>
-  role === "drums"
-    ? "תופים"
-    : role === "bass"
-      ? "בס"
-      : [...s.instruments, ...(s.backup || [])].find((i) => ROLE_OF[i] === "harmony");
+const instFor = (s, role) => {
+  if (role === "drums") return "תופים";
+  if (role === "bass") return "בס";
+  // הרמוני ומלודי — הכלי הראשון של התלמיד שממלא את התפקיד
+  return [...s.instruments, ...(s.backup || [])].find((i) => (ROLE_OF[i] || "melody") === role);
+};
 
 /* מי יכול למלא תפקיד חיוני. כלי משני הוא רזרבה: הוא נכנס רק כשאין אף
    נוכח שזה כליו הראשי — כלומר בחיסור, ולא כדי להקל על מי שכן נוכח. */
@@ -150,9 +148,9 @@ function makeGroups(roster, k, ledger) {
   const inGroup = (s, g) => groups[g].some((m) => m.id === s.id);
   const free = (g, inst) => !UNIQUE.has(inst) || !groups[g].some((m) => m.playing === inst);
 
-  // 1. ריתמיקה מלאה: תופים, בס וכלי הרמוני בכל הרכב.
-  //    מתחילים מהתפקיד שיש בו הכי מעט נגנים.
-  const roles = ["drums", "bass", "harmony"].sort(
+  // 1. התפקידים שחייבים: תופים, בס, כלי הרמוני וכלי מלודי בכל הרכב.
+  //    מתחילים מהתפקיד שיש בו הכי מעט נגנים — הוא הכי קשה לספק.
+  const roles = [...REQUIRED].sort(
     (a, b) => forRole(roster, a).length - forRole(roster, b).length
   );
   for (const role of roles) {
@@ -178,8 +176,12 @@ function makeGroups(roster, k, ledger) {
     }
   }
 
-  // 2. כל השאר — מי שעוד לא ניגן היום. סדר התור: הכי "מקופחים" קודם,
-  //    ובתוך זה מקובצים לפי כלי כדי לפזר כלים זהים בין ההרכבים.
+  /* 2. כל השאר — מי שעוד לא ניגן היום.
+     קודם מקבצים לפי כלי ומשרשרים בסבב, כדי לפזר כלים זהים בין ההרכבים.
+     ואז ממיינים את התור כולו לפי הפנקס — מיון יציב, ולכן הסבב נשמר בתוך
+     כל רמת חוב. הסדר הגלובלי הזה חשוב דווקא כשנגמרים הכיסאות: מי שנשאר
+     בסוף התור הוא מי שיישב, וזה חייב להיות מי שכבר צבר הכי הרבה. בלי
+     המיון, מקום בתור נקבע לפי גודל קבוצת הכלי ולא לפי הצבירה. */
   const rest = roster.filter((s) => !load[s.id] && !s.teacher);
   const buckets = {};
   rest.forEach((s) => (buckets[s.instruments[0]] = [...(buckets[s.instruments[0]] || []), s]));
@@ -191,6 +193,7 @@ function makeGroups(roster, k, ledger) {
     more = false;
     for (const b of lists) if (b.length) (queue.push(b.shift()), (more = true));
   }
+  queue.sort((x, y) => debt(x) - debt(y));
 
   const bench = [];
   const melodic = (g) => groups[g].filter((m) => m.slot === "melody").length;
@@ -199,12 +202,17 @@ function makeGroups(roster, k, ledger) {
       bestInst = null,
       bestScore = Infinity;
     for (let g = 0; g < k; g++) {
+      // תקרת הגודל נאכפת כאן, במקום היחיד שמגדיל הרכבים. בלי זה MAX_GROUP
+      // היה רק שיקול בניקוד, והרכבים של שמונה נגנים יצאו בפועל.
+      if (groups[g].length >= MAX_GROUP) continue;
       const fam = groups[g].reduce((a, m) => a + (ledger.pairs[pairKey(s.id, m.id)] || 0), 0);
       s.instruments.forEach((inst, ord) => {
         if (!free(g, inst) || inGroup(s, g)) return;
+        // שני כלים מלודיים זהים בהרכב הם מפגש מוזיקלי לגיטימי ולא תקלה,
+        // ולכן העונש קל — מספיק כדי לפזר, לא כדי למנוע.
         const same = groups[g].filter((m) => m.playing === inst).length;
         const score =
-          melodic(g) * 100 + groups[g].length * 25 + same * 40 + fam * 6 + ord * 8 + Math.random() * 4;
+          melodic(g) * 100 + groups[g].length * 25 + same * 12 + fam * 6 + ord * 8 + Math.random() * 4;
         if (score < bestScore) (bestScore = score), (best = g), (bestInst = inst);
       });
     }
@@ -212,10 +220,14 @@ function makeGroups(roster, k, ledger) {
     else place(s, bestInst, "melody", best);
   }
 
-  // אם המורה לא נדרש לאף כיסא — הוא מצטרף להרכב שאין בו פסנתר
+  /* אם המורה לא נדרש לאף כיסא — הוא מצטרף להרכב שאין בו פסנתר, והקטן
+     ביותר מביניהם. גם הוא כפוף לתקרת הגודל: קודם הוא לא היה, וזה היה
+     המקור האחרון להרכבים של שמונה נגנים. */
   const teacher = roster.find((s) => s.teacher);
   if (teacher && !load[teacher.id]) {
-    const open = shuffle([...Array(k).keys()]).filter((g) => free(g, "פסנתר"));
+    const open = shuffle([...Array(k).keys()])
+      .filter((g) => free(g, "פסנתר") && groups[g].length < MAX_GROUP)
+      .sort((a, b) => groups[a].length - groups[b].length);
     if (open.length) place(teacher, "פסנתר", "harmony", open[0]);
   }
 
@@ -244,10 +256,10 @@ function enrichHarmony(res, roster, ledger) {
   const groups = res.groups.map((g) => [...g]);
   const load = { ...res.load };
   const enriched = [];
-  /* תקרת גודל: הרכב יגדל עד MAX_GROUP, או עד הגודל שהחלוקה כבר חייבה —
-     הגדול מביניהם. כך ההעשרה ממלאת את ההרכבים הקטנים ומאזנת אותם,
-     ולעולם לא מנפחת הרכב מעבר למה שכבר היה בו. */
-  const cap = Math.max(MAX_GROUP, ...groups.map((g) => g.length));
+  /* תקרת הגודל היא אותה תקרה של החלוקה עצמה. קודם היא הייתה
+     Math.max(MAX_GROUP, הגודל שיצא בפועל) — מפני שהחלוקה ידעה לחרוג
+     מ-MAX_GROUP. עכשיו היא לא, ולכן די בתקרה אחת. */
+  const cap = MAX_GROUP;
   // מהקטן לגדול: יכולת ההעשרה מוגבלת ב-MAX_LOAD, ועדיף שתלך להרכב
   // שחסר בו נגן מאשר תנפח הרכב שכבר גדול
   const order = groups.map((g, i) => i).sort((a, b) => groups[a].length - groups[b].length);
@@ -315,12 +327,17 @@ function bestDraw(roster, k, ledger, tries = 160) {
   return enrichHarmony(best, roster, ledger);
 }
 
-const ROLE_MISSING = { drums: "תופים", bass: "בס", harmony: "כלי הרמוני" };
+const ROLE_MISSING = {
+  drums: "תופים",
+  bass: "בס",
+  harmony: "כלי הרמוני",
+  melody: "כלי מלודי",
+};
 
 /** אילו תפקידים חיוניים חסרים בהרכב. לפי הכלי שמנגנים בפועל, ולא לפי ה-slot,
     כי גיטריסט שנכנס כתוספת מסומן melody אבל עדיין ממלא תפקיד הרמוני. */
 const missingRoles = (g) =>
-  ["drums", "bass", "harmony"].filter((r) => !g.some((m) => ROLE_OF[m.playing] === r));
+  REQUIRED.filter((r) => !g.some((m) => (ROLE_OF[m.playing] || "melody") === r));
 
 /**
  * מכניס תלמיד לחלוקה קיימת בלי לפרק אותה — בשביל מי שהגיע באמצע השיעור.
@@ -374,7 +391,7 @@ function removeFromDraw(res, id) {
 
 /**
  * משלים תפקידים חיוניים שנפערו בחלוקה קיימת — בלי להזיז אף אחד ממקומו.
- * זה מה ששומר על הכלל "תופים, בס וכלי הרמוני בכל הרכב" גם כשמישהו יוצא
+ * זה מה ששומר על הכלל "תופים, בס, כלי הרמוני וכלי מלודי בכל הרכב" גם כשמישהו יוצא
  * באמצע השיעור, במקום לפרק הכול ולחלק מחדש.
  *
  * מי שנכנס נבחר לפי אותם כללים כמו בחלוקה עצמה: קודם מי שעוד לא מנגן
@@ -682,68 +699,74 @@ function rowsToLedger(cls, rows) {
 
 
 /**
- * האם ההעדפה של הכיתה ישימה עם מי שנוכח היום. ישימה = יש חלוקה שבה איש
- * לא יושב בחוץ, וההרכב הגדול חורג לכל היותר בנגן אחד מ-MAX_GROUP.
- * כשהיא לא ישימה — למשל בשיעור עם הרבה נעדרים — חוזרים לחישוב הרגיל
- * במקום להמליץ על מספר שיוציא תלמידים לספסל.
+ * טבלת האפשרויות: לכל מספר הרכבים אפשרי — מה הוא אומר בפועל על הרצפה.
+ * גודל ההרכב הקטן והגדול, כמה תלמידים יידרשו לנגן ביותר מהרכב אחד, וכמה
+ * יישארו בחוץ. זו ההחלטה הפדגוגית של המורה, ולכן היא מוצגת לו ולא נקבעת
+ * בקבוע נסתר לכל כיתה.
+ *
+ * `fits` הוא התנאי היחיד שמעניין: אף אחד לא יושב בחוץ, ואף הרכב לא עובר
+ * את MAX_GROUP. לכל k דוגמים כמה חלוקות ולא אחת, כי חלוקה בודדת עלולה
+ * לצאת גרועה במקרה ולעוות את הטבלה.
  */
-function preferredK(roster, prefer, max) {
-  if (!prefer || prefer > max) return null;
-  const fits = attempt(roster, prefer, EMPTY, 40).some(
-    (r) => !r.bench.length && Math.max(...r.groups.map((g) => g.length)) <= MAX_GROUP + PREFER_SLACK
-  );
-  return fits ? prefer : null;
+function options(pool, tries = 40) {
+  const top = Math.min(MAX_GROUPS, Math.max(1, Math.floor(pool.length / MIN_GROUP)));
+  const out = [];
+  for (let k = 1; k <= top; k++) {
+    let best = null;
+    for (const r of attempt(pool, k, EMPTY, tries)) {
+      const sizes = r.groups.map((g) => g.length);
+      const cand = {
+        k,
+        bench: r.bench.length,
+        biggest: Math.max(...sizes),
+        smallest: Math.min(...sizes),
+        doubling: Object.values(r.load).filter((n) => n > 1).length,
+      };
+      cand.fits = !cand.bench && cand.biggest <= MAX_GROUP;
+      if (!best || cand.bench < best.bench || (cand.bench === best.bench && cand.biggest < best.biggest))
+        best = cand;
+    }
+    if (best) out.push(best);
+  }
+  return out;
 }
 
 /**
- * כמה הרכבים אפשר להרכיב, וכמה מומלץ.
- * לכל k דוגמים כמה חלוקות ולא אחת — חלוקה בודדת עלולה לצאת גרועה במקרה
- * ולהפיל את ההמלצה. ואם אף k לא עומד בכל התנאים בוחרים את הטוב שנמצא
+ * כמה הרכבים אפשר, וכמה מומלץ.
+ *
+ * כלל אחד: **הכי מעט הרכבים שבהם אף אחד לא יושב בחוץ ואף הרכב לא עובר
+ * את MAX_GROUP.** פחות הרכבים פירושו יותר זמן במה לכל אחד — כל הרכב מספיק
+ * לנגן כמה פעמים בשיעור — וגם פחות תלמידים שנדרשים לנגן פעמיים. לכן
+ * מוסיפים הרכב רק כשהקודם כבר צפוף מדי.
+ *
+ * הכלל הזה מחזיר בדיוק את מה ששלושה קבועים נפרדים החזיקו קודם ביד
+ * (PREFERRED_GROUPS, PREFER_SLACK ו-preferredK): 4 הרכבים בי״א, 3 בט׳.
+ * כשאף מספר לא עומד בתנאי — שיעור עם הרבה נעדרים — בוחרים את הטוב שנמצא
  * (הכי מעט יושבים, ואז ההרכב הגדול הקטן ביותר) במקום ליפול ל-1.
- * `prefer` הוא ההעדפה של הכיתה (PREFERRED_GROUPS); היא גוברת על החישוב
- * כשהיא ישימה, ו-max לא מושפע ממנה — המורה עדיין יכול לבחור ידנית אחרת.
  */
-function capacity(roster, prefer) {
-  const hardMax = Math.min(MAX_GROUPS, Math.max(1, Math.floor(roster.length / 4)));
-  let max = hardMax;
-  while (max > 1 && !attempt(roster, max, EMPTY, 25).length) max--;
-
-  const better = (a, b) => !b || a.bench < b.bench || (a.bench === b.bench && a.biggest < b.biggest);
-  let rec = null;
-  let fallback = null;
-  for (let k = max; k >= 1; k--) {
-    let best = null;
-    for (const r of attempt(roster, k, EMPTY, 40)) {
-      const cand = { k, bench: r.bench.length, biggest: Math.max(...r.groups.map((g) => g.length)) };
-      if (better(cand, best)) best = cand;
-    }
-    if (!best) continue;
-    if (better(best, fallback)) fallback = best;
-    if (!best.bench && best.biggest <= MAX_GROUP) {
-      rec = k;
-      break;
-    }
-  }
-  const auto = rec ?? (fallback ? fallback.k : max);
-  return { max, rec: preferredK(roster, prefer, max) ?? auto };
+function capacity(pool) {
+  const opts = options(pool);
+  if (!opts.length) return { max: 1, rec: 1, options: [] };
+  const max = Math.max(...opts.map((o) => o.k));
+  const fit = opts.filter((o) => o.fits);
+  const rec = fit.length
+    ? Math.min(...fit.map((o) => o.k))
+    : opts.reduce((b, o) => (o.bench < b.bench || (o.bench === b.bench && o.biggest < b.biggest) ? o : b))
+        .k;
+  return { max, rec, options: opts };
 }
 
-const ROLE_LABEL = { drums: "מתופפים", bass: "בסיסטים", harmony: "כלים הרמוניים" };
+const ROLE_LABEL = {
+  drums: "מתופפים",
+  bass: "בסיסטים",
+  harmony: "כלים הרמוניים",
+  melody: "כלים מלודיים",
+};
 
-/* מה חוסם את מספר ההרכבים. מאז שהתפקידים החיוניים גוברים על MAX_LOAD,
-   נגן יחיד בתפקיד מכסה כמה הרכבים שצריך — ולכן מספר הנגנים בתפקיד כבר
-   אינו מגביל. מה שחוסם הוא תפקיד שאין לו אף נגן נוכח.
-   מחזיר את התפקיד החיוני הדל ביותר; missing אומר שהוא ריק לגמרי,
-   ואז אי אפשר להרכיב אף הרכב. */
-function bottleneck(pool) {
-  let count = Infinity;
-  let role = null;
-  for (const r of ["drums", "bass", "harmony"]) {
-    const n = forRole(pool, r).length;
-    if (n < count) (count = n), (role = r);
-  }
-  return { role, count, missing: count === 0 };
-}
+/* התפקידים החיוניים שאין להם אף נגן נוכח — הדבר היחיד שחוסם חלוקה לגמרי.
+   נגן אחד בתפקיד מספיק לכמה הרכבים שצריך, ולכן מספר הנגנים בתפקיד אינו
+   מגביל את מספר ההרכבים; רק תפקיד ריק לגמרי חוסם. */
+const emptyRoles = (pool) => REQUIRED.filter((r) => !forRole(pool, r).length);
 
 export {
   RAW,
@@ -753,9 +776,10 @@ export {
   TABS,
   TEACHER,
   MAX_LOAD,
+  MIN_GROUP,
   MAX_GROUP,
   MAX_GROUPS,
-  PREFERRED_GROUPS,
+  REQUIRED,
   ROLE_OF,
   ROLE_LABEL,
   ORDER,
@@ -784,7 +808,9 @@ export {
   cost,
   bestDraw,
   capacity,
-  bottleneck,
+  options,
+  emptyRoles,
+  missingRoles,
   encodeLedger,
   decodeLedger,
   ledgerToRows,

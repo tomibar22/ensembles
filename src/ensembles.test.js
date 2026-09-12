@@ -5,9 +5,10 @@ import {
   CLASSES,
   TEACHER,
   MAX_LOAD,
+  MIN_GROUP,
   MAX_GROUP,
   MAX_GROUPS,
-  PREFERRED_GROUPS,
+  REQUIRED,
   ROLE_OF,
   EMPTY,
   applyLesson,
@@ -30,7 +31,7 @@ import {
   attempt,
   bestDraw,
   capacity,
-  bottleneck,
+  emptyRoles,
   encodeLedger,
   decodeLedger,
   ledgerToRows,
@@ -47,7 +48,7 @@ const overloadOk = (pool, k, id, n) => {
   if (n <= MAX_LOAD) return true;
   const me = pool.find((s) => s.id === id);
   if (!me) return false;
-  return ["drums", "bass", "harmony"].some(
+  return REQUIRED.some(
     (r) => me.roles.includes(r) && pool.filter((s) => s.roles.includes(r)).length * MAX_LOAD < k
   );
 };
@@ -171,10 +172,9 @@ test("forRole מעדיף ראשי, ונופל לרזרבה רק בהיעדרו",
 test("תפקיד שיש לו רק רזרבה אינו נחשב חסר", () => {
   const roster = ROSTERS["ט׳"];
   const noPrimaryBass = roster.filter((s) => !s.roles.includes("bass"));
-  const b = bottleneck([...noPrimaryBass, TEACHER]);
-  assert.equal(b.missing, false, "תפקיד עם רזרבה דווח כחסר");
+  assert.ok(!emptyRoles([...noPrimaryBass, TEACHER]).includes("bass"), "תפקיד עם רזרבה דווח כחסר");
   const noBassAtAll = roster.filter((s) => !s.roles.includes("bass") && !s.backupRoles.includes("bass"));
-  assert.equal(bottleneck([...noBassAtAll, TEACHER]).missing, true);
+  assert.ok(emptyRoles([...noBassAtAll, TEACHER]).includes("bass"));
 });
 
 test("כל כלי משני הוא כלי מוכר, ואינו כפול לכלי ראשי", () => {
@@ -278,11 +278,12 @@ test("applyLesson לא משנה את הבסיס, כדי שאפשר יהיה לב
 
 test("הפנקס מוריד עומס ממי שמקדים בתוך אותו תפקיד (רגרסיה)", () => {
   /* נגני ריתמיקה ינגנו יותר ממלודיים — זה מבני ומקובל, כי כל הרכב חייב
-     תופים, בס וכלי הרמוני. האיזון נעשה בין השיעורים דרך הפנקס: מי שצבר
+     תופים, בס, כלי הרמוני וכלי מלודי. האיזון נעשה בין השיעורים דרך הפנקס: מי שצבר
      יותר מקבל פחות כיסאות בשיעור הבא. זה המנגנון שהאפליקציה נשענת עליו. */
   const roster = ROSTERS["י״א"];
   const pool = poolOf("י״א");
   const k = recK("י״א");
+  let balanced = 0;
   ["drums", "bass"].forEach((role) => {
     const players = roster.filter((s) => s.roles.includes(role));
     assert.ok(players.length > 1, `אין מספיק נגני ${role} לבדיקה`);
@@ -297,15 +298,22 @@ test("הפנקס מוריד עומס ממי שמקדים בתוך אותו תפ�
       const d = bestDraw(pool, k, ledger);
       players.forEach((s) => (seats[s.id] = (seats[s.id] || 0) + (d.load[s.id] || 0)));
     }
+    /* כשהביקוש מחייב את כולם בדיוק באותה מידה — בי״א יש שני בסיסטים
+       וארבעה כיסאות בס, כלומר שניים לכל אחד — אין מה לאזן, וזה תקין.
+       הפנקס נמדד שם שאין לו מרחב תמרון; המדידה האמיתית היא בתפקיד שבו
+       העומס כן יכול להשתנות (מתופפים: שלושה נגנים על ארבעה כיסאות). */
+    const forced = players.length * MAX_LOAD === k;
     players
       .filter((s) => s.id !== ahead.id)
       .forEach((s) =>
         assert.ok(
-          seats[ahead.id] < seats[s.id],
+          forced ? seats[ahead.id] === seats[s.id] : seats[ahead.id] < seats[s.id],
           `${role}: ${ahead.name} צבר 30 וקיבל ${seats[ahead.id]} כיסאות, ${s.name} צבר 10 וקיבל ${seats[s.id]}`
         )
       );
+    if (!forced) balanced++;
   });
+  assert.ok(balanced > 0, "אף תפקיד לא אפשר איזון — הבדיקה איבדה את השיניים");
 });
 
 /* ==================== שינוי נוכחות באמצע השיעור ==================== */
@@ -772,23 +780,22 @@ test("לעולם לא יותר מ-MAX_GROUPS הרכבים", () => {
   CLASSES.forEach((cls) => assert.ok(capacity(poolOf(cls)).max <= MAX_GROUPS, cls));
 });
 
-test("ההעשרה לא מנפחת הרכב מעבר לגודל שכבר היה בחלוקה", () => {
+test("ההעשרה לא מנפחת הרכב מעבר לתקרת הגודל", () => {
   CLASSES.forEach((cls) => {
     const pool = poolOf(cls);
     const k = recK(cls);
     for (let i = 0; i < 15; i++) {
       const raw = attempt(pool, k, EMPTY, 1)[0];
       if (!raw) continue;
-      const cap = Math.max(MAX_GROUP, ...raw.groups.map((g) => g.length));
       const rich = enrichHarmony(raw, pool, EMPTY);
       rich.groups.forEach((g, gi) =>
-        assert.ok(g.length <= cap, `${cls}/${gi + 1}: ${g.length} נגנים, מעל התקרה ${cap}`)
+        assert.ok(g.length <= MAX_GROUP, `${cls}/${gi + 1}: ${g.length} נגנים, מעל התקרה ${MAX_GROUP}`)
       );
     }
   });
 });
 
-test("ההעשרה מאזנת גדלים ולא מגדילה פערים", () => {
+test("ההעשרה מאזנת גדלים ולא פותחת פער של יותר מנגן אחד", () => {
   CLASSES.forEach((cls) => {
     const pool = poolOf(cls);
     const k = recK(cls);
@@ -799,7 +806,14 @@ test("ההעשרה מאזנת גדלים ולא מגדילה פערים", () => 
       const sz = (r) => r.groups.map((g) => g.length);
       const gap = (r) => Math.max(...sz(r)) - Math.min(...sz(r));
       const rich = enrichHarmony(raw, pool, EMPTY);
-      assert.ok(gap(rich) <= gap(raw), `${cls}: הפער גדל מ-${gap(raw)} ל-${gap(rich)}`);
+      /* ההעשרה מוסיפה כיסא אחד להרכב, ולכן היא יכולה ליצור פער של נגן
+         אחד כשכל ההרכבים יצאו שווים. מה שהיא לא תעשה זה להגדיל פער קיים:
+         היא הולכת להרכב הקטן ביותר קודם, ולעולם לא חורגת מ-MAX_GROUP. */
+      assert.ok(
+        gap(rich) <= Math.max(gap(raw), 1),
+        `${cls}: הפער גדל מ-${gap(raw)} ל-${gap(rich)}`
+      );
+      rich.groups.forEach((g) => assert.ok(g.length <= MAX_GROUP, `${cls}: ${g.length} נגנים`));
       checked++;
     }
     assert.ok(checked > 5, `${cls}: נבדקו רק ${checked} חלוקות`);
@@ -928,43 +942,64 @@ test("נגן יחיד בתפקיד חיוני מנגן בכל ההרכבים (ר
   assert.equal(d.load[drummer.id], rec, "המתופף לא ניגן בכל ההרכבים");
 });
 
-test("ההעדפה של הכיתה גוברת על החישוב, ועדיין מחלקת את כולם", () => {
-  /* בי״א המורה מעדיף 4 הרכבים, אף שהחישוב היה בוחר 5. ההעדפה שווה משהו
-     רק אם היא באמת מתחלקת: אף אחד לא יושב בחוץ, ובכל הרכב ריתמיקה מלאה. */
-  Object.entries(PREFERRED_GROUPS).forEach(([cls, prefer]) => {
+test("ההמלצה היא הכי מעט הרכבים שבהם אף אחד לא יושב ואין חריגת גודל", () => {
+  /* זה כל הכלל. קודם היו כאן שלושה קבועים (PREFERRED_GROUPS, PREFER_SLACK)
+     ופונקציה נפרדת (preferredK) שקבעו ידנית 4 לי״א — הכלל מחזיר את אותו
+     מספר, בלי להכיר את הכיתה. */
+  each((cls, teacher) => {
+    const pool = poolOf(cls, teacher);
+    const { rec, options: opts } = capacity(pool);
+    const fit = opts.filter((o) => o.fits);
+    if (!fit.length) return; // אין מספר שעומד בתנאי — נבדק בבדיקה הבאה
+    assert.equal(rec, Math.min(...fit.map((o) => o.k)), `${cls} teacher=${teacher}: לא הכי מעט`);
+    opts
+      .filter((o) => o.k < rec)
+      .forEach((o) =>
+        assert.ok(!o.fits, `${cls}: k=${o.k} היה מתאים אבל ההמלצה הייתה ${rec}`)
+      );
+  });
+});
+
+test("ההמלצה בפועל לא מושיבה איש ולא חורגת מהגודל", () => {
+  each((cls, teacher) => {
+    const pool = poolOf(cls, teacher);
+    const { rec } = capacity(pool);
+    for (let i = 0; i < 12; i++) {
+      const d = bestDraw(pool, rec, EMPTY);
+      assert.ok(d, `${cls}: אי אפשר לחלק ל-${rec}`);
+      assert.equal(d.bench.length, 0, `${cls}: ${d.bench.length} תלמידים על הספסל`);
+      d.groups.forEach((g, gi) =>
+        assert.ok(g.length <= MAX_GROUP, `${cls}/${gi + 1}: ${g.length} נגנים`)
+      );
+    }
+  });
+});
+
+test("הטבלה מתארת נכון את מה שהחלוקה באמת מייצרת", () => {
+  /* המורה בוחר מספר לפי הטבלה. אם היא לא מתארת את המציאות, הבחירה שלו
+     נשענת על מספרים מומצאים. */
+  CLASSES.forEach((cls) => {
     const pool = poolOf(cls);
-    const { max, rec } = capacity(pool, prefer);
-    assert.equal(rec, prefer, `${cls}: ההעדפה ${prefer} לא כובדה (rec=${rec})`);
-    assert.ok(prefer <= max, `${cls}: ההעדפה ${prefer} מעל המקסימום ${max}`);
-    const d = bestDraw(pool, rec, EMPTY);
-    assert.ok(d, `${cls}: אי אפשר לחלק ל-${rec}`);
-    assert.equal(d.bench.length, 0, `${cls}: ${d.bench.length} תלמידים על הספסל בהעדפה`);
-    assert.equal(d.groups.length, prefer, `${cls}: יצאו ${d.groups.length} הרכבים`);
-    d.groups.forEach((g, i) =>
-      ["drums", "bass", "harmony"].forEach((r) =>
-        assert.ok(g.some((m) => ROLE_OF[m.playing] === r), `${cls}: הרכב ${i + 1} בלי ${r}`)
-      )
+    capacity(pool).options.forEach((o) => {
+      assert.ok(o.k >= 1 && o.k <= MAX_GROUPS, `${cls}: k=${o.k} מחוץ לטווח`);
+      assert.equal(o.fits, !o.bench && o.biggest <= MAX_GROUP, `${cls}/k=${o.k}: fits לא עקבי`);
+      assert.ok(o.smallest <= o.biggest, `${cls}/k=${o.k}: קטן גדול מגדול`);
+      const d = bestDraw(pool, o.k, EMPTY);
+      assert.ok(d, `${cls}: הטבלה הציעה k=${o.k} שאי אפשר לחלק אליו`);
+      assert.equal(d.groups.length, o.k, `${cls}: יצאו ${d.groups.length} הרכבים במקום ${o.k}`);
+    });
+  });
+});
+
+test("הטבלה לא מציעה הרכב קטן מארבעה נגנים", () => {
+  /* MIN_GROUP נגזר מארבעת התפקידים החיוניים: פחות מזה אינו הרכב. */
+  assert.equal(MIN_GROUP, REQUIRED.length);
+  CLASSES.forEach((cls) => {
+    const pool = poolOf(cls);
+    assert.ok(
+      capacity(pool).max <= Math.floor(pool.length / MIN_GROUP),
+      `${cls}: המקסימום מאפשר הרכבים קטנים מ-${MIN_GROUP}`
     );
-  });
-});
-
-test("ההעדפה לא מרחיבה את המקסימום ולא נכפית כשאי אפשר", () => {
-  Object.entries(PREFERRED_GROUPS).forEach(([cls, prefer]) => {
-    const pool = poolOf(cls);
-    assert.equal(capacity(pool, prefer).max, capacity(pool).max, `${cls}: ההעדפה שינתה את max`);
-    /* שיעור עם הרבה נעדרים: אם ההעדפה עדיין הייתה נכפית, תלמידים היו
-       יוצאים לספסל או שהחלוקה כלל לא הייתה מתקיימת. */
-    const few = pool.slice(0, 4 * prefer - 5);
-    const { max, rec } = capacity(few, prefer);
-    assert.ok(rec <= max, `${cls}: rec=${rec} מעל max=${max} בכיתה חסרה`);
-    if (max < prefer) assert.equal(rec, capacity(few).rec, `${cls}: ההעדפה דלפה לכיתה חסרה`);
-  });
-});
-
-test("כיתה בלי העדפה ממשיכה לפי החישוב", () => {
-  CLASSES.filter((cls) => !PREFERRED_GROUPS[cls]).forEach((cls) => {
-    const pool = poolOf(cls);
-    assert.equal(capacity(pool, PREFERRED_GROUPS[cls]).rec, capacity(pool).rec, cls);
   });
 });
 
@@ -987,23 +1022,22 @@ test("ההמלצה מכבדת את גודל ההרכב כשאפשר, ואחרת 
   });
 });
 
-/* ============================ צוואר הבקבוק ============================ */
+/* ============================ תפקיד ריק ============================ */
 
 test("תפקיד חיוני חוסם רק כשאין בו אף נגן", () => {
   const oneDrummer = ROSTERS["י״א"].filter(
     (s) => !["נועם-בנימיני", "איתן-יעקובסון"].includes(s.id)
   );
-  const b = bottleneck(oneDrummer);
-  assert.equal(b.role, "drums");
-  assert.equal(b.count, 1);
-  assert.equal(b.missing, false, "מתופף אחד אינו חוסם — הוא מכסה כמה הרכבים שצריך");
+  assert.deepEqual(emptyRoles(oneDrummer), [], "מתופף אחד אינו חוסם — הוא מכסה כמה הרכבים שצריך");
   assert.ok(capacity(oneDrummer).max > 1);
 
   const noDrums = ROSTERS["י״א"].filter((s) => !s.roles.includes("drums"));
-  const b2 = bottleneck(noDrums);
-  assert.equal(b2.role, "drums");
-  assert.equal(b2.missing, true);
+  assert.deepEqual(emptyRoles(noDrums), ["drums"]);
   assert.equal(bestDraw(noDrums, 1, EMPTY), null, "נוצרה חלוקה בלי מתופף");
+
+  const noMelody = ROSTERS["י״א"].filter((s) => !s.roles.includes("melody"));
+  assert.deepEqual(emptyRoles(noMelody), ["melody"]);
+  assert.equal(bestDraw(noMelody, 1, EMPTY), null, "נוצרה חלוקה בלי כלי מלודי");
 });
 
 /* ============================ הגיבוי ============================ */
