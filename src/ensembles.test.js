@@ -6,6 +6,7 @@ import {
   TEACHER,
   MAX_LOAD,
   MAX_GROUP,
+  MAX_GROUPS,
   ROLE_OF,
   EMPTY,
   applyLesson,
@@ -591,6 +592,55 @@ test("פסנתר וגיטרה יחד אכן קורה בחלוקה המומלצת
         if (harmIn(g).length > 1) both++;
       });
     assert.ok(both >= draws, `${cls}: רק ${both} הרכבים עם פסנתר וגיטרה ב-${draws} חלוקות`);
+  });
+});
+
+test("לעולם לא יותר מ-MAX_GROUPS הרכבים", () => {
+  // כיתה גדולה מלאכותית: בלי התקרה היא הייתה מגיעה ל-10 הרכבים
+  const many = [];
+  ["תופים", "בס", "פסנתר", "חליל"].forEach((inst) =>
+    Array.from({ length: 10 }, (_, i) =>
+      many.push({ id: inst + i, name: inst + i, instruments: [inst], roles: [ROLE_OF[inst] || "melody"] })
+    )
+  );
+  assert.ok(Math.floor(many.length / 4) > MAX_GROUPS, "הכיתה המלאכותית קטנה מדי לבדיקה");
+  const c = capacity(many);
+  assert.ok(c.max <= MAX_GROUPS, `max=${c.max} חורג מ-${MAX_GROUPS}`);
+  assert.ok(c.rec <= MAX_GROUPS, `rec=${c.rec} חורג מ-${MAX_GROUPS}`);
+  CLASSES.forEach((cls) => assert.ok(capacity(poolOf(cls)).max <= MAX_GROUPS, cls));
+});
+
+test("ההעשרה לא מנפחת הרכב מעבר לגודל שכבר היה בחלוקה", () => {
+  CLASSES.forEach((cls) => {
+    const pool = poolOf(cls);
+    const k = recK(cls);
+    for (let i = 0; i < 15; i++) {
+      const raw = attempt(pool, k, EMPTY, 1)[0];
+      if (!raw) continue;
+      const cap = Math.max(MAX_GROUP, ...raw.groups.map((g) => g.length));
+      const rich = enrichHarmony(raw, pool, EMPTY);
+      rich.groups.forEach((g, gi) =>
+        assert.ok(g.length <= cap, `${cls}/${gi + 1}: ${g.length} נגנים, מעל התקרה ${cap}`)
+      );
+    }
+  });
+});
+
+test("ההעשרה מאזנת גדלים ולא מגדילה פערים", () => {
+  CLASSES.forEach((cls) => {
+    const pool = poolOf(cls);
+    const k = recK(cls);
+    let checked = 0;
+    for (let i = 0; i < 20; i++) {
+      const raw = attempt(pool, k, EMPTY, 1)[0];
+      if (!raw || raw.bench.length) continue;
+      const sz = (r) => r.groups.map((g) => g.length);
+      const gap = (r) => Math.max(...sz(r)) - Math.min(...sz(r));
+      const rich = enrichHarmony(raw, pool, EMPTY);
+      assert.ok(gap(rich) <= gap(raw), `${cls}: הפער גדל מ-${gap(raw)} ל-${gap(rich)}`);
+      checked++;
+    }
+    assert.ok(checked > 5, `${cls}: נבדקו רק ${checked} חלוקות`);
   });
 });
 

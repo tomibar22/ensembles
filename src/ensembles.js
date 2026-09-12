@@ -215,11 +215,16 @@ function enrichHarmony(res, roster, ledger) {
   const groups = res.groups.map((g) => [...g]);
   const load = { ...res.load };
   const enriched = [];
-  // מהקטן לגדול: יכולת ההעשרה מוגבלת (MAX_LOAD), ועדיף שתלך להרכב
+  /* תקרת גודל: הרכב יגדל עד MAX_GROUP, או עד הגודל שהחלוקה כבר חייבה —
+     הגדול מביניהם. כך ההעשרה ממלאת את ההרכבים הקטנים ומאזנת אותם,
+     ולעולם לא מנפחת הרכב מעבר למה שכבר היה בו. */
+  const cap = Math.max(MAX_GROUP, ...groups.map((g) => g.length));
+  // מהקטן לגדול: יכולת ההעשרה מוגבלת ב-MAX_LOAD, ועדיף שתלך להרכב
   // שחסר בו נגן מאשר תנפח הרכב שכבר גדול
   const order = groups.map((g, i) => i).sort((a, b) => groups[a].length - groups[b].length);
   order.forEach((i) => {
     const g = groups[i];
+    if (g.length >= cap) return;
     if (g.filter((m) => ROLE_OF[m.playing] === "harmony").length !== 1) return;
     const cands = roster.filter(
       (s) =>
@@ -647,6 +652,7 @@ function rowsToLedger(cls, rows) {
 }
 
 const MAX_GROUP = 6; // מעבר לזה ההרכב כבר לא באמת מנגן
+const MAX_GROUPS = 5; // יותר מזה לא מנוהל בשיעור אחד
 
 /**
  * כמה הרכבים אפשר להרכיב, וכמה מומלץ.
@@ -655,7 +661,7 @@ const MAX_GROUP = 6; // מעבר לזה ההרכב כבר לא באמת מנגן
  * (הכי מעט יושבים, ואז ההרכב הגדול הקטן ביותר) במקום ליפול ל-1.
  */
 function capacity(roster) {
-  const hardMax = Math.max(1, Math.floor(roster.length / 4));
+  const hardMax = Math.min(MAX_GROUPS, Math.max(1, Math.floor(roster.length / 4)));
   let max = hardMax;
   while (max > 1 && !attempt(roster, max, EMPTY, 25).length) max--;
 
@@ -702,6 +708,7 @@ export {
   TEACHER,
   MAX_LOAD,
   MAX_GROUP,
+  MAX_GROUPS,
   ROLE_OF,
   ROLE_LABEL,
   ORDER,
