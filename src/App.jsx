@@ -609,7 +609,10 @@ export default function App() {
                     aria-pressed={out}
                     style={{
                       display: "flex",
-                      alignItems: "baseline",
+                      // center ולא baseline: עם minHeight, baseline מצמיד
+                      // את הטקסט לראש הקפסולה במקום למרכז אותה
+                      alignItems: "center",
+                      justifyContent: "center",
                       gap: 6,
                       minHeight: 44, // מטרת מגע נוחה באצבע
                       padding: "0 14px",
