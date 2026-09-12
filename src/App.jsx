@@ -299,16 +299,28 @@ export default function App() {
       });
     } else {
       const added = addToDraw(res, student, ledger);
-      if (!added)
+      if (!added) {
+        /* באמת אין מקום. במקום להשאיר אותו מחוץ לחלוקה בלי שום אחיזה
+           בממשק, מושיבים אותו על הספסל — שם הוא נראה, ואפשר להחליף
+           אותו ידנית עם כל מי שההחלפה איתו חוקית. */
         return dispatch({
-          type: "msg",
-          msg: `אין כיסא פנוי ל${student.name} (${student.instruments[0]}) באף הרכב — צריך לחלק מחדש.`,
+          type: "edit",
+          res: { ...res, bench: [...res.bench, student] },
+          msg: `אין כיסא פנוי ל${student.name} (${student.instruments[0]}) באף הרכב. הוא על הספסל — אפשר להחליף אותו ידנית, או לחלק מחדש.`,
         });
+      }
       const left = removeFromDraw(added, "").broken;
+      const rep = added.replaced;
       dispatch({
         type: "edit",
         res: added,
-        msg: `${student.name} הצטרף להרכב ${added.joined + 1}.` + (left.length ? ` ${gapText(left)}.` : ""),
+        msg:
+          `${student.name} הצטרף להרכב ${added.joined + 1}` +
+          (rep
+            ? ` במקום ${rep.name}, שניגן ב-${rep.was} הרכבים ועכשיו ב${rep.now === 1 ? "אחד" : `-${rep.now}`}.`
+            : ".") +
+          (added.oversize ? ` ההרכב גדול בנגן אחד מהרגיל, כדי שלא יישב בחוץ.` : "") +
+          (left.length ? ` ${gapText(left)}.` : ""),
       });
     }
   };

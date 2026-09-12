@@ -471,36 +471,106 @@ const missingRoles = (g) =>
 
 /**
  * מכניס תלמיד לחלוקה קיימת בלי לפרק אותה — בשביל מי שהגיע באמצע השיעור.
- * בוחר את ההרכב שהכי מתאים: קודם כל אחד שחסר בו תפקיד חיוני שהתלמיד ממלא,
- * אחר כך ההרכב הקטן ביותר, ומי שהוא ניגן איתו הכי מעט.
- * מחזיר null אם אין לו כיסא פנוי באף הרכב.
+ *
+ * שלושה מסלולים, לפי סדר:
+ *
+ * 1. **כיסא פנוי** בהרכב שאינו מלא. קודם הרכב שחסר בו תפקיד חיוני שהתלמיד
+ *    ממלא, אחר כך ההרכב הקטן ביותר, ומי שהוא ניגן איתו הכי מעט.
+ *
+ * 2. **פינוי כיסא ממי שמנגן בכמה הרכבים.** פסנתרן שאיחר נתקל בכך שלכל
+ *    ההרכבים כבר יש פסנתר — אבל חלק מהכיסאות האלה נתפסו בכפל דווקא מפני
+ *    שהוא לא היה כאן. להחזיר לו כיסא כזה זה לא "לפרק את החלוקה", זה
+ *    לבטל פתרון שנועד להיעדרותו: הוא מקבל לנגן, והמוכפל יורד להרכב אחד.
+ *    בוחרים את מי שמנגן הכי הרבה, ומתוכם את ההרכב שהתלמיד ניגן איתו
+ *    הכי מעט. ההרכב נבדק אחרי ההחלפה — הוא חייב להישאר עם כל התפקידים.
+ *
+ * 3. **כיסא פנוי גם במחיר חריגה מ-MAX_GROUP.** מוצא אחרון: עדיף הרכב של
+ *    שמונה מאשר תלמיד שהגיע ויושב בחוץ. מדווח ב-`oversize`.
+ *
+ * מחזיר null רק כשבאמת אין שום מקום. `replaced` מציין שכיסא פונה.
  */
 function addToDraw(res, student, ledger) {
   if (res.groups.some((g) => g.some((m) => m.id === student.id))) return null;
-  let best = null;
-  let bestInst = null;
-  let bestScore = Infinity;
+  const load = res.load || {};
+  const byOrder = (a, b) => orderOf(a.playing) - orderOf(b.playing);
+  const famWith = (members) =>
+    members.reduce((a, m) => a + (ledger.pairs[pairKey(student.id, m.id)] || 0), 0);
+  const seatOf = (inst) => ({ ...student, playing: inst, slot: ROLE_OF[inst] || "melody" });
+
+  // 1 ו-3: כיסא פנוי. `room` מבדיל בין הרכב שיש בו מקום לבין חריגה מהגודל.
+  const freeSeat = (room) => {
+    let best = null;
+    let bestInst = null;
+    let bestScore = Infinity;
+    res.groups.forEach((g, i) => {
+      if (room !== g.length < MAX_GROUP) return;
+      const fam = famWith(g);
+      const gaps = missingRoles(g);
+      student.instruments.forEach((inst, ord) => {
+        if (UNIQUE.has(inst) && g.some((m) => m.playing === inst)) return;
+        const fills = gaps.includes(ROLE_OF[inst] || "melody") ? -1000 : 0; // סותם חור אמיתי
+        const same = g.filter((m) => m.playing === inst).length;
+        const score = fills + g.length * 25 + same * 12 + fam * 6 + ord * 8;
+        if (score < bestScore) (bestScore = score), (best = i), (bestInst = inst);
+      });
+    });
+    return best === null ? null : { group: best, inst: bestInst };
+  };
+
+  const join = (pick, extra) => ({
+    groups: res.groups.map((g, i) =>
+      i === pick.group ? [...g, seatOf(pick.inst)].sort(byOrder) : g
+    ),
+    load: { ...load, [student.id]: (load[student.id] || 0) + 1 },
+    bench: res.bench.filter((s) => s.id !== student.id),
+    joined: pick.group,
+    ...extra,
+  });
+
+  const room = freeSeat(true);
+  if (room) return join(room);
+
+  // 2. פינוי כיסא ממי שמנגן ביותר מהרכב אחד
+  const swaps = [];
   res.groups.forEach((g, i) => {
-    const fam = g.reduce((a, m) => a + (ledger.pairs[pairKey(student.id, m.id)] || 0), 0);
-    const gaps = missingRoles(g);
-    student.instruments.forEach((inst, ord) => {
-      if (UNIQUE.has(inst) && g.some((m) => m.playing === inst)) return;
-      const fills = gaps.includes(ROLE_OF[inst]) ? -1000 : 0; // סותם חור אמיתי
-      const same = g.filter((m) => m.playing === inst).length;
-      const score = fills + g.length * 25 + same * 40 + fam * 6 + ord * 8;
-      if (score < bestScore) (bestScore = score), (best = i), (bestInst = inst);
+    g.forEach((m) => {
+      if (m.teacher || (load[m.id] || 0) < 2) return;
+      const rest = g.filter((x) => x !== m);
+      student.instruments.forEach((inst, ord) => {
+        if (UNIQUE.has(inst) && rest.some((x) => x.playing === inst)) return;
+        // ההרכב חייב להישאר שלם אחרי ההחלפה, לא רק לפניה
+        if (missingRoles([...rest, seatOf(inst)]).length) return;
+        swaps.push({ group: i, inst, ord, out: m, busy: load[m.id], fam: famWith(rest) });
+      });
     });
   });
-  if (best === null) return null;
-  const joined = { ...student, playing: bestInst, slot: ROLE_OF[bestInst] || "melody" };
-  return {
-    groups: res.groups.map((g, i) =>
-      i === best ? [...g, joined].sort((a, b) => orderOf(a.playing) - orderOf(b.playing)) : g
-    ),
-    load: { ...res.load, [student.id]: (res.load[student.id] || 0) + 1 },
-    bench: res.bench.filter((s) => s.id !== student.id),
-    joined: best,
-  };
+  if (swaps.length) {
+    swaps.sort(
+      (a, b) => b.busy - a.busy || a.fam - b.fam || a.ord - b.ord || Math.random() - 0.5
+    );
+    const pick = swaps[0];
+    const nextLoad = { ...load, [student.id]: (load[student.id] || 0) + 1 };
+    nextLoad[pick.out.id] = pick.busy - 1;
+    return {
+      groups: res.groups.map((g, i) =>
+        i === pick.group ? [...g.filter((x) => x !== pick.out), seatOf(pick.inst)].sort(byOrder) : g
+      ),
+      load: nextLoad,
+      bench: res.bench.filter((s) => s.id !== student.id),
+      joined: pick.group,
+      replaced: {
+        id: pick.out.id,
+        name: pick.out.name,
+        instrument: pick.out.playing,
+        was: pick.busy,
+        now: pick.busy - 1,
+      },
+    };
+  }
+
+  // 3. מוצא אחרון: הרכב חורג בנגן, ובלבד שמי שהגיע ינגן
+  const over = freeSeat(false);
+  return over ? join(over, { oversize: true }) : null;
 }
 
 /**

@@ -31,6 +31,7 @@ import {
   pairKey,
   attempt,
   bestDraw,
+  missingRoles,
   capacity,
   emptyRoles,
   SEED,
@@ -357,12 +358,77 @@ test("מי שכבר בחלוקה לא נכנס פעמיים", () => {
   assert.equal(addToDraw(r, inside, EMPTY), null);
 });
 
-test("כשאין כיסא פנוי מדווחים במקום לדחוף בכוח", () => {
-  // מתופף נוסף כשכל ההרכבים כבר מלאים בתופים
-  const r = drawFor("ט׳");
-  r.groups.forEach((g) => assert.ok(g.some((m) => m.playing === "תופים")));
-  const extraDrummer = { id: "חדש-מתופף", name: "חדש", instruments: ["תופים"], roles: ["drums"] };
-  assert.equal(addToDraw(r, extraDrummer, EMPTY), null);
+test("מי שאיחר מקבל כיסא של מי שמנגן בשניים, במקום להישאר בחוץ (רגרסיה)", () => {
+  /* פסנתרן שאיחר נתקל בכך שלכל ההרכבים כבר יש פסנתר — אבל חלק מהכיסאות
+     האלה נתפסו בכפל דווקא מפני שהוא לא היה כאן. עד לתיקון הזה האפליקציה
+     אמרה "צריך לחלק מחדש", בזמן שהיה פתרון ברור על המסך. */
+  const roster = ROSTERS["י״א"];
+  const late = roster.find((s) => s.id === "דן-טל הוד");
+  const pool = [...roster.filter((s) => s.id !== late.id), TEACHER];
+  const k = capacity(pool).rec;
+  let swapped = 0;
+  for (let i = 0; i < 12; i++) {
+    const r = bestDraw(pool, k, EMPTY);
+    const a = addToDraw(r, late, EMPTY);
+    assert.ok(a, "המאחר נשאר בלי כיסא");
+    const seats = a.groups.flat().filter((m) => m.id === late.id).length;
+    assert.equal(seats, 1, "המאחר לא קיבל בדיוק כיסא אחד");
+    if (!a.replaced) continue;
+    swapped++;
+    // מי שפינה את הכיסא יורד בהרכב אחד, והעומס תואם למציאות
+    assert.equal(a.replaced.now, a.replaced.was - 1);
+    assert.equal(
+      a.groups.flat().filter((m) => m.id === a.replaced.id).length,
+      a.load[a.replaced.id],
+      "העומס לא תואם לכיסאות בפועל"
+    );
+    // וההרכב נשאר שלם
+    a.groups.forEach((g, gi) =>
+      assert.equal(missingRoles(g).length, 0, `הרכב ${gi + 1} נשבר בהחלפה`)
+    );
+  }
+  assert.ok(swapped > 0, "אף פעם לא פונה כיסא — הבדיקה לא בדקה כלום");
+});
+
+test("פינוי כיסא לא מעלה אף אחד מעל מה שכבר היה, ולא מנפח הרכב", () => {
+  CLASSES.forEach((cls) => {
+    const roster = ROSTERS[cls];
+    roster.slice(0, 5).forEach((late) => {
+      const pool = [...roster.filter((s) => s.id !== late.id), TEACHER];
+      const r = bestDraw(pool, capacity(pool).rec, EMPTY);
+      const a = addToDraw(r, late, EMPTY);
+      if (!a) return;
+      a.groups.forEach((g, gi) => {
+        assert.ok(g.length <= MAX_GROUP || a.oversize, `${cls}/${gi + 1}: ${g.length} נגנים`);
+        const ids = g.map((m) => m.id);
+        assert.equal(new Set(ids).size, ids.length, `${cls}: תלמיד פעמיים באותו הרכב`);
+      });
+      Object.entries(a.load).forEach(([id, n]) =>
+        assert.ok(n <= Math.max(MAX_LOAD, r.load[id] || 0), `${cls}: ${id} קפץ ל-${n} הרכבים`)
+      );
+    });
+  });
+});
+
+test("כשבאמת אין מקום ואף אחד לא מנגן פעמיים — מדווחים ולא דוחפים בכוח", () => {
+  /* חלוקה בנויה ביד: שני הרכבים מלאים, כל אחד עם מתופף משלו ובעומס 1.
+     אין כיסא תופים פנוי ואין ממי לפנות — וזה המקרה היחיד שנשאר null. */
+  const mk = (id, inst) => ({ id, name: id, instruments: [inst], roles: [ROLE_OF[inst] || "melody"] });
+  const group = (n) =>
+    [
+      [`תופים${n}`, "תופים"],
+      [`בס${n}`, "בס"],
+      [`פסנתר${n}`, "פסנתר"],
+      [`חליל${n}`, "חליל"],
+    ].map(([id, inst]) => ({ ...mk(id, inst), playing: inst, slot: ROLE_OF[inst] || "melody" }));
+  const groups = [group(1), group(2)];
+  const load = {};
+  groups.flat().forEach((m) => (load[m.id] = 1));
+  const res = { groups, load, bench: [] };
+  groups.forEach((g) => assert.equal(missingRoles(g).length, 0));
+  assert.equal(addToDraw(res, mk("מתופף-נוסף", "תופים"), EMPTY), null);
+  // ולעומת זאת כלי מלודי כן נכנס — אין לו התנגשות
+  assert.ok(addToDraw(res, mk("חלילן-נוסף", "חליל"), EMPTY));
 });
 
 test("מי שממלא תפקיד חסר מקבל עדיפות על ההרכב הקטן", () => {
