@@ -705,6 +705,43 @@ function rowsToAtt(rows) {
     }));
 }
 
+/**
+ * סיכום לכל תלמיד, לצורך מעקב וציונים.
+ *
+ * הנתונים כבר נרשמים — ביומן הנוכחות ובפנקס — אבל עד עכשיו הדרך היחידה
+ * לראות אותם הייתה לפתוח את הגיליון ביד.
+ *
+ * ביומן נרשמות רק חריגות, ולכן הנוכחות מחושבת בחיסור: כל שיעור שלא
+ * נרשם בו חיסור הוא שיעור שהתלמיד היה בו. תלמיד שנוסף באמצע השנה ייראה
+ * לכן נוכח בשיעורים שקדמו לו — אין לנו תאריך הצטרפות, ועדיף לומר את זה
+ * בממשק מאשר להמציא נתון.
+ */
+function attendanceSummary(roster, log, ledger) {
+  const lessons = ledger.lessons || 0;
+  const byId = {};
+  (log || []).forEach((e) => {
+    const b = (byId[e.id] ||= { absent: 0, late: 0, left: 0 });
+    if (b[e.status] !== undefined) b[e.status] += 1;
+  });
+  return roster.map((s) => {
+    const b = byId[s.id] || { absent: 0, late: 0, left: 0 };
+    const present = Math.max(0, lessons - b.absent);
+    return {
+      id: s.id,
+      name: s.name,
+      instrument: s.instruments[0] || "",
+      lessons,
+      present,
+      absent: b.absent,
+      late: b.late,
+      left: b.left,
+      plays: ledger.plays[s.id] || 0,
+      // אחוז נוכחות. בלי שיעורים כלל אין מה להציג, ו-100% היה שקר נוח.
+      rate: lessons ? Math.round((present / lessons) * 100) : null,
+    };
+  });
+}
+
 const EMPTY = { plays: {}, pairs: {}, lessons: 0 };
 
 /**
@@ -920,6 +957,7 @@ export {
   mergeAttendance,
   attToRows,
   rowsToAtt,
+  attendanceSummary,
   applyLesson,
   addToDraw,
   enrichHarmony,

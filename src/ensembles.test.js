@@ -24,6 +24,7 @@ import {
   mergeAttendance,
   attToRows,
   rowsToAtt,
+  attendanceSummary,
   buildRoster,
   forRole,
   ORDER,
@@ -1336,4 +1337,75 @@ test("תלמיד חדש בעריכה אינו נחשב שגוי לפני שנש�
   const draft = [...SEED["ט׳"], ["נועה", "קלר", ["קלרינט"], "", []]];
   assert.ok(rosterProblems(draft).some((m) => m.includes("אין מזהה")), "הטיוטה הגולמית תקינה?");
   assert.deepEqual(rosterProblems(assignIds(draft)), [], "תלמיד חדש עדיין חוסם שמירה");
+});
+
+/* ==================== סיכום לציונים ==================== */
+
+const sumOf = (roster, log, ledger) =>
+  Object.fromEntries(attendanceSummary(roster, log, ledger).map((e) => [e.id, e]));
+
+test("הסיכום סופר חיסורים, איחורים ויציאות לכל תלמיד", () => {
+  const roster = ROSTERS["ט׳"];
+  const [a, b] = roster;
+  const log = [
+    { date: "1", lesson: 1, id: a.id, name: a.name, status: "absent" },
+    { date: "2", lesson: 2, id: a.id, name: a.name, status: "absent" },
+    { date: "2", lesson: 2, id: a.id, name: a.name, status: "late" },
+    { date: "3", lesson: 3, id: b.id, name: b.name, status: "left" },
+  ];
+  const ledger = { plays: { [a.id]: 4 }, pairs: {}, lessons: 10 };
+  const sum = sumOf(roster, log, ledger);
+  assert.equal(sum[a.id].absent, 2);
+  assert.equal(sum[a.id].late, 1);
+  assert.equal(sum[a.id].plays, 4);
+  assert.equal(sum[b.id].left, 1);
+  assert.equal(sum[b.id].absent, 0);
+});
+
+test("הנוכחות מחושבת בחיסור, כי ביומן יש רק חריגות", () => {
+  const roster = ROSTERS["ט׳"];
+  const s0 = roster[0];
+  const ledger = { plays: {}, pairs: {}, lessons: 20 };
+  const log = Array.from({ length: 5 }, (_, i) => ({
+    date: "d", lesson: i + 1, id: s0.id, name: s0.name, status: "absent",
+  }));
+  const sum = sumOf(roster, log, ledger);
+  assert.equal(sum[s0.id].present, 15);
+  assert.equal(sum[s0.id].rate, 75);
+  // מי שלא נרשם ביומן כלל היה נוכח בכל השיעורים
+  assert.equal(sum[roster[1].id].present, 20);
+  assert.equal(sum[roster[1].id].rate, 100);
+});
+
+test("בלי שיעורים שמורים אין אחוז נוכחות, ולא 100% מומצא", () => {
+  const sum = sumOf(ROSTERS["ט׳"], [], EMPTY);
+  Object.values(sum).forEach((e) => {
+    assert.equal(e.rate, null, `${e.name}: הומצא אחוז`);
+    assert.equal(e.present, 0);
+  });
+});
+
+test("הסיכום נבנה מהיומן שחוזר מהגיליון, לא רק מהיומן שבזיכרון", () => {
+  const roster = ROSTERS["י״א"];
+  const s0 = roster[0];
+  const log = [{ date: "2026-09-07", lesson: 3, id: s0.id, name: s0.name, status: "late" }];
+  const back = rowsToAtt(attToRows(log));
+  const ledger = { plays: {}, pairs: {}, lessons: 3 };
+  assert.equal(sumOf(roster, back, ledger)[s0.id].late, 1);
+});
+
+test("הסיכום מכסה את כל הכיתה, כולל מי שאין לו שום רישום", () => {
+  CLASSES.forEach((cls) => {
+    const out = attendanceSummary(ROSTERS[cls], [], { plays: {}, pairs: {}, lessons: 4 });
+    assert.equal(out.length, ROSTERS[cls].length, cls);
+    out.forEach((e) => assert.ok(e.name && e.id, `${cls}: רשומה בלי שם`));
+  });
+});
+
+test("רישום של תלמיד שכבר לא ברשימה לא מופיע ולא מפיל", () => {
+  const roster = ROSTERS["ט׳"];
+  const log = [{ date: "1", lesson: 1, id: "מי-שעזב", name: "מי שעזב", status: "absent" }];
+  const out = attendanceSummary(roster, log, { plays: {}, pairs: {}, lessons: 5 });
+  assert.equal(out.length, roster.length);
+  assert.ok(!out.some((e) => e.id === "מי-שעזב"));
 });
