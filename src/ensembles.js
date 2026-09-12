@@ -58,6 +58,8 @@ const TABS = { "ט׳": "g9", "י״א": "g11" }; // לשוניות בגיליון
    בכל ההרכבים, כי אחרת חלקם יישארו בלי בס. ההקלה תקפה רק לתפקידים
    החיוניים; צירוף מלודי והעשרה לעולם לא יחרגו. */
 const MAX_LOAD = 2;
+const MAX_GROUP = 6; // מעבר לזה ההרכב כבר לא באמת מנגן
+const MAX_GROUPS = 5; // יותר מזה לא מנוהל בשיעור אחד
 const TEACHER = {
   id: "__teacher",
   name: "תומר",
@@ -672,8 +674,6 @@ function rowsToLedger(cls, rows) {
   return { plays, pairs, lessons };
 }
 
-const MAX_GROUP = 6; // מעבר לזה ההרכב כבר לא באמת מנגן
-const MAX_GROUPS = 5; // יותר מזה לא מנוהל בשיעור אחד
 
 /**
  * כמה הרכבים אפשר להרכיב, וכמה מומלץ.

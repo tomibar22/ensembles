@@ -20,7 +20,6 @@ import {
   swapPlayers,
   BENCH,
   ROLE_MISSING,
-  pairKey,
   bestDraw,
   capacity,
   bottleneck,

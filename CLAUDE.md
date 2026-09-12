@@ -17,6 +17,12 @@ git push origin main
 git checkout <branch>
 ```
 
+**לבדוק את שלושתם לפי קוד היציאה, לא לפי טקסט.** `npx eslint . | tail -1`
+מחזיר שורה ריקה גם כשיש שגיאה, ובגלל זה חמש דחיפות רצופות נכשלו ב-CI
+בזמן שדווח "lint נקי". להריץ `npm run lint; echo $?` או בלי pipe בכלל.
+
+**ואחרי הדחיפה — לוודא שה-CI עבר בפועל**, לא להסתמך על הריצה המקומית.
+
 `.github/workflows/ci.yml` מריץ lint, בדיקות ובנייה על כל דחיפה ל-`main`.
 הוא **לא** מפרסם — הפרסום הוא של Vercel בלבד.
 
@@ -25,6 +31,8 @@ git checkout <branch>
 - `npm test` — 78 בדיקות על `node:test`, בלי תלויות. חייב להיות ירוק.
   הפקודה היא `node --test` בלי תבנית glob: node 20 לא תומך בהן ו-CI נפל על זה.
 - `npm run lint` — errors בלבד חוסמים; warnings של הוקים מקובלים.
+  שים לב: `no-use-before-define` תופס גם קבוע שמוגדר בהמשך הקובץ ומשמש
+  קודם — להגדיר קבועים בראש, ליד `MAX_LOAD`.
 - `npm run dev` / `npm run build`
 
 ## מבנה
