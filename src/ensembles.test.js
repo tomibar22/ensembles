@@ -154,6 +154,38 @@ test("applyLesson לא משנה את הבסיס, כדי שאפשר יהיה לב
   assert.deepEqual(base, snapshot, "הבסיס שונה במקום להיות מועתק");
 });
 
+test("הפנקס מוריד עומס ממי שמקדים בתוך אותו תפקיד (רגרסיה)", () => {
+  /* נגני ריתמיקה ינגנו יותר ממלודיים — זה מבני ומקובל, כי כל הרכב חייב
+     תופים, בס וכלי הרמוני. האיזון נעשה בין השיעורים דרך הפנקס: מי שצבר
+     יותר מקבל פחות כיסאות בשיעור הבא. זה המנגנון שהאפליקציה נשענת עליו. */
+  const roster = ROSTERS["י״א"];
+  const pool = poolOf("י״א");
+  const k = recK("י״א");
+  ["drums", "bass"].forEach((role) => {
+    const players = roster.filter((s) => s.roles.includes(role));
+    assert.ok(players.length > 1, `אין מספיק נגני ${role} לבדיקה`);
+    const ahead = players[0];
+    const ledger = {
+      plays: Object.fromEntries(roster.map((s) => [s.id, s.id === ahead.id ? 30 : 10])),
+      pairs: {},
+      lessons: 10,
+    };
+    const seats = {};
+    for (let i = 0; i < 20; i++) {
+      const d = bestDraw(pool, k, ledger);
+      players.forEach((s) => (seats[s.id] = (seats[s.id] || 0) + (d.load[s.id] || 0)));
+    }
+    players
+      .filter((s) => s.id !== ahead.id)
+      .forEach((s) =>
+        assert.ok(
+          seats[ahead.id] < seats[s.id],
+          `${role}: ${ahead.name} צבר 30 וקיבל ${seats[ahead.id]} כיסאות, ${s.name} צבר 10 וקיבל ${seats[s.id]}`
+        )
+      );
+  });
+});
+
 /* ==================== שינוי נוכחות באמצע השיעור ==================== */
 
 const drawFor = (cls, k) => bestDraw([...ROSTERS[cls], TEACHER], k ?? recK("ט׳"), EMPTY);
