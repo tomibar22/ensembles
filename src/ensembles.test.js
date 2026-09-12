@@ -23,6 +23,8 @@ import {
   attToRows,
   rowsToAtt,
   buildRoster,
+  forRole,
+  ORDER,
   pairKey,
   attempt,
   bestDraw,
@@ -76,6 +78,112 @@ test("מזהה כפול נכשל ברעש ולא בשקט", () => {
   assert.throws(
     () => buildRoster([["א", "ב", ["בס"], "x"], ["ג", "ד", ["תופים"], "x"]]),
     /מזהה כפול/
+  );
+});
+
+/* ========================= כלי משני (רזרבה) ========================= */
+
+test("כלי משני נכנס רק כשאין אף נוכח שזה כליו הראשי", () => {
+  const roster = ROSTERS["י״א"];
+  const backupBass = roster.find((s) => s.backupRoles.includes("bass"));
+  assert.ok(backupBass, "אין בי״א בעל כלי משני בס לבדיקה");
+  const primaries = roster.filter((s) => s.roles.includes("bass"));
+  assert.ok(primaries.length >= 2, "צריך שני בסיסטים ראשיים לבדיקה");
+
+  // כל הבסיסטים הראשיים נוכחים — הרזרבה לא נכנסת לתפקיד
+  for (let i = 0; i < 15; i++) {
+    const d = bestDraw(poolOf("י״א"), recK("י״א"), EMPTY);
+    const asBass = d.groups.flat().filter((mm) => mm.id === backupBass.id && mm.playing === "בס");
+    assert.equal(asBass.length, 0, `${backupBass.name} ניגן בס למרות שיש בסיסט ראשי נוכח`);
+  }
+
+  // גם כשרק אחד מהם נוכח — עדיין יש ראשי, ולכן הרזרבה עדיין לא נכנסת
+  const oneGone = roster.filter((s) => s.id !== primaries[0].id);
+  const pool1 = [...oneGone, TEACHER];
+  const d1 = bestDraw(pool1, capacity(pool1).rec, EMPTY);
+  assert.ok(d1);
+  assert.equal(
+    d1.groups.flat().filter((mm) => mm.id === backupBass.id && mm.playing === "בס").length,
+    0,
+    "הרזרבה נכנסה למרות שנשאר בסיסט ראשי"
+  );
+});
+
+test("כלי משני כן נכנס כשאין אף ראשי נוכח", () => {
+  const roster = ROSTERS["י״א"];
+  const backupBass = roster.find((s) => s.backupRoles.includes("bass"));
+  const present = roster.filter((s) => !s.roles.includes("bass"));
+  const pool = [...present, TEACHER];
+  const k = capacity(pool).rec;
+  const d = bestDraw(pool, k, EMPTY);
+  assert.ok(d, "לא נוצרה חלוקה למרות שיש רזרבה");
+  d.groups.forEach((g, i) =>
+    assert.ok(g.some((mm) => mm.playing === "בס"), `הרכב ${i + 1} נשאר בלי בס`)
+  );
+  assert.ok(d.load[backupBass.id] > 0, "הרזרבה לא שובצה");
+});
+
+test("הבסיסט היחיד בט׳ נעדר — הרזרבה מצילה את השיעור (רגרסיה)", () => {
+  const cls = "ט׳";
+  const roster = ROSTERS[cls];
+  const onlyBass = roster.filter((s) => s.roles.includes("bass"));
+  assert.equal(onlyBass.length, 1, "ההנחה השתנתה: כבר לא בסיסט יחיד");
+  const present = roster.filter((s) => s.id !== onlyBass[0].id);
+  const pool = [...present, TEACHER];
+  const k = capacity(pool).rec;
+  assert.ok(k >= 1);
+  const d = bestDraw(pool, k, EMPTY);
+  assert.ok(d, "בלי הבסיסט היחיד לא נוצרה חלוקה — הרזרבה לא עבדה");
+  d.groups.forEach((g, i) =>
+    assert.ok(g.some((mm) => mm.playing === "בס"), `הרכב ${i + 1} בלי בס`)
+  );
+});
+
+test("כלי משני אינו משמש לצירוף מלודי ולא להעשרה", () => {
+  CLASSES.forEach((cls) => {
+    const roster = ROSTERS[cls];
+    for (let i = 0; i < 15; i++) {
+      const d = recDraw(cls);
+      (d.enriched || []).forEach((e) => {
+        const s = roster.find((x) => x.id === e.id);
+        assert.ok(s.roles.includes("harmony"), `${e.name} הועשר על כלי משני`);
+      });
+      // נגן שאינו ממלא תפקיד חיוני מנגן תמיד בכלי ראשי שלו
+      d.groups.flat().forEach((mm) => {
+        if (mm.teacher || ["drums", "bass", "harmony"].includes(mm.slot)) return;
+        const s = roster.find((x) => x.id === mm.id);
+        assert.ok(s.instruments.includes(mm.playing), `${mm.name} שובץ ל${mm.playing} שאינו כליו הראשי`);
+      });
+    }
+  });
+});
+
+test("forRole מעדיף ראשי, ונופל לרזרבה רק בהיעדרו", () => {
+  const prim = { id: "p", name: "p", instruments: ["בס"], roles: ["bass"], backup: [], backupRoles: [] };
+  const back = { id: "b", name: "b", instruments: ["חליל"], roles: ["melody"], backup: ["בס"], backupRoles: ["bass"] };
+  assert.deepEqual(forRole([prim, back], "bass"), [prim]);
+  assert.deepEqual(forRole([back], "bass"), [back]);
+  assert.deepEqual(forRole([prim], "bass"), [prim]);
+  assert.deepEqual(forRole([back], "drums"), []);
+});
+
+test("תפקיד שיש לו רק רזרבה אינו נחשב חסר", () => {
+  const roster = ROSTERS["ט׳"];
+  const noPrimaryBass = roster.filter((s) => !s.roles.includes("bass"));
+  const b = bottleneck([...noPrimaryBass, TEACHER]);
+  assert.equal(b.missing, false, "תפקיד עם רזרבה דווח כחסר");
+  const noBassAtAll = roster.filter((s) => !s.roles.includes("bass") && !s.backupRoles.includes("bass"));
+  assert.equal(bottleneck([...noBassAtAll, TEACHER]).missing, true);
+});
+
+test("כל כלי משני הוא כלי מוכר, ואינו כפול לכלי ראשי", () => {
+  CLASSES.forEach((cls) =>
+    ROSTERS[cls].forEach((s) => {
+      s.backup.forEach((inst) => {
+        assert.ok(ORDER.includes(inst), `${s.name}: כלי משני לא מוכר — ${inst}`);
+        assert.ok(!s.instruments.includes(inst), `${s.name}: ${inst} מופיע גם כראשי וגם כמשני`);
+      });
+    })
   );
 });
 

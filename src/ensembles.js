@@ -19,7 +19,7 @@ const RAW = {
     ["נדב", "מילדוורט", ["בס"], "נדב-מילדוורט"],
     ["שי", "ספין", ["שירה"], "שי-ספין"],
     ["הלל", "עפרוני", ["חצוצרה"], "הלל-עפרוני"],
-    ["יהונתן", "צדוק", ["פסנתר", "בס"], "יהונתן-צדוק"],
+    ["יהונתן", "צדוק", ["פסנתר"], "יהונתן-צדוק", ["בס"]],
     ["דן", "קוצ׳ין", ["שירה"], "דן-קוצ׳ין"],
     ["ליר", "רגב", ["שירה"], "ליר-רגב"],
     ["נתן", "רנדל", ["אלט"], "נתן-רנדל"],
@@ -33,12 +33,12 @@ const RAW = {
     ["אביגיל", "וייס גולדשטיין", ["שירה"], "אביגיל-וייס גולדשטיין"],
     ["אלונה", "זעירא", ["חליל"], "אלונה-זעירא"],
     ["נועם", "טל", ["טנור"], "נועם-טל"],
-    ["יהלי", "יריב", ["גיטרה"], "יהלי-יריב"],
+    ["יהלי", "יריב", ["גיטרה"], "יהלי-יריב", ["בס"]],
     ["עדאל", "ירמקוב", ["שירה"], "עדאל-ירמקוב"],
     ["אוריה", "כהן אוריה", ["חצוצרה"], "סמואל-כהן אוריה"],
     ["ניב", "כנען", ["בס"], "ניב-כנען"],
     ["לאו", "סוסנה", ["תופים"], "לאו-סוסנה"],
-    ["דני", "סלומון", ["חצוצרה"], "דניאל-סלומון"],
+    ["דני", "סלומון", ["חצוצרה"], "דניאל-סלומון", ["פסנתר"]],
     ["אלון", "ספורטא", ["פסנתר"], "אלון-ספורטא"],
     ["מאיה", "פינטו", ["חליל"], "מאיה-פינטו"],
     ["אדם", "פלוינסקי", ["פסנתר"], "אדם-פלוינסקי"],
@@ -75,11 +75,14 @@ const TEACHER = {
 function buildRoster(list) {
   const c = {};
   list.forEach(([f]) => (c[f] = (c[f] || 0) + 1));
-  const roster = list.map(([first, last, inst, id]) => ({
+  const roster = list.map(([first, last, inst, id, backup = []]) => ({
     id: id || `${first}-${last}`,
     name: c[first] > 1 ? `${first} ${last}` : first,
     instruments: inst,
     roles: [...new Set(inst.map((x) => ROLE_OF[x] || "melody"))],
+    // כלים משניים: רזרבה בלבד. נכנסים רק כשאין אף נוכח שזה כליו הראשי.
+    backup,
+    backupRoles: [...new Set(backup.map((x) => ROLE_OF[x] || "melody"))],
   }));
   const ids = new Set(roster.map((s) => s.id));
   if (ids.size !== roster.length) throw new Error("יש מזהה כפול ברשימת התלמידים");
@@ -107,8 +110,21 @@ const shuffle = (a0) => {
   return a;
 };
 const pairKey = (a, b) => (a < b ? `${a}|${b}` : `${b}|${a}`);
+/* הכלי שבו התלמיד ימלא את התפקיד. כולל כלים משניים, כי כשהם נכנסים
+   לפעולה התלמיד מנגן בהם בפועל. */
 const instFor = (s, role) =>
-  role === "drums" ? "תופים" : role === "bass" ? "בס" : s.instruments.find((i) => ROLE_OF[i] === "harmony");
+  role === "drums"
+    ? "תופים"
+    : role === "bass"
+      ? "בס"
+      : [...s.instruments, ...(s.backup || [])].find((i) => ROLE_OF[i] === "harmony");
+
+/* מי יכול למלא תפקיד חיוני. כלי משני הוא רזרבה: הוא נכנס רק כשאין אף
+   נוכח שזה כליו הראשי — כלומר בחיסור, ולא כדי להקל על מי שכן נוכח. */
+const forRole = (pool, role) => {
+  const primary = pool.filter((s) => s.roles.includes(role));
+  return primary.length ? primary : pool.filter((s) => (s.backupRoles || []).includes(role));
+};
 
 /**
  * החלוקה נשענת על "פנקס" אחד: כמה הרכבים כל תלמיד ניגן בסך כל השיעורים
@@ -129,10 +145,10 @@ function makeGroups(roster, k, ledger) {
   // 1. ריתמיקה מלאה: תופים, בס וכלי הרמוני בכל הרכב.
   //    מתחילים מהתפקיד שיש בו הכי מעט נגנים.
   const roles = ["drums", "bass", "harmony"].sort(
-    (a, b) => roster.filter((s) => s.roles.includes(a)).length - roster.filter((s) => s.roles.includes(b)).length
+    (a, b) => forRole(roster, a).length - forRole(roster, b).length
   );
   for (const role of roles) {
-    const cands = roster.filter((s) => s.roles.includes(role));
+    const cands = forRole(roster, role);
     for (const g of shuffle([...Array(k).keys()])) {
       const fits = (s) => !inGroup(s, g) && free(g, instFor(s, role));
       let ok = cands.filter((s) => (load[s.id] || 0) < MAX_LOAD && fits(s));
@@ -366,8 +382,9 @@ function repairDraw(res, pool, ledger) {
   const filled = [];
   groups.forEach((g, i) => {
     for (const role of missingRoles(g)) {
+      const able = forRole(pool, role);
       const fits = (s) =>
-        s.roles.includes(role) &&
+        able.includes(s) &&
         !g.some((m) => m.id === s.id) &&
         !g.some((m) => m.playing === instFor(s, role));
       let cands = pool.filter((s) => fits(s) && (load[s.id] || 0) < MAX_LOAD);
@@ -699,7 +716,7 @@ function bottleneck(pool) {
   let count = Infinity;
   let role = null;
   for (const r of ["drums", "bass", "harmony"]) {
-    const n = pool.filter((s) => s.roles.includes(r)).length;
+    const n = forRole(pool, r).length;
     if (n < count) (count = n), (role = r);
   }
   return { role, count, missing: count === 0 };
@@ -736,6 +753,7 @@ export {
   swapPlayers,
   BENCH,
   buildRoster,
+  forRole,
   pairKey,
   makeGroups,
   attempt,
