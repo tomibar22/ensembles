@@ -197,6 +197,57 @@ function makeGroups(roster, k, ledger) {
   };
 }
 
+/**
+ * כלי הרמוני שני בהרכב — פסנתר וגיטרה יחד, שזה מותר ורצוי.
+ *
+ * בחלוקה רגילה זה לא קורה: כל נגן הרמוני נדרש לכיסא האחד של הרכב אחר,
+ * ושלב המלודיה מצרף רק מי שעוד לא מנגן היום. לכן ההעשרה מצרפת נגן
+ * שכבר מנגן — והתנאי לכך הוא שהספסל ריק. כשאיש לא יושב, הכיסא הנוסף
+ * לא בא על חשבון זמן נגינה של אף אחד, והפנקס יאזן את העומס בשיעור הבא.
+ * כשמישהו כן יושב, לתת לאחר לנגן פעמיים זה בדיוק הקיפוח שהפנקס נועד למנוע.
+ *
+ * המורה אינו מועמד: הוא נכנס להרכב אחד בלבד ואינו נספר בפנקס.
+ * רץ אחרי בחירת החלוקה ולא בתוכה, כדי ש-capacity תמשיך למדוד את
+ * החלוקה עצמה — אחרת תוספת נגן להרכב הייתה מצמצמת את מספר ההרכבים.
+ */
+function enrichHarmony(res, roster, ledger) {
+  if (res.bench.length) return res;
+  const groups = res.groups.map((g) => [...g]);
+  const load = { ...res.load };
+  const enriched = [];
+  // מהקטן לגדול: יכולת ההעשרה מוגבלת (MAX_LOAD), ועדיף שתלך להרכב
+  // שחסר בו נגן מאשר תנפח הרכב שכבר גדול
+  const order = groups.map((g, i) => i).sort((a, b) => groups[a].length - groups[b].length);
+  order.forEach((i) => {
+    const g = groups[i];
+    if (g.filter((m) => ROLE_OF[m.playing] === "harmony").length !== 1) return;
+    const cands = roster.filter(
+      (s) =>
+        !s.teacher &&
+        s.roles.includes("harmony") &&
+        (load[s.id] || 0) < MAX_LOAD &&
+        !g.some((m) => m.id === s.id) &&
+        !g.some((m) => m.playing === instFor(s, "harmony"))
+    );
+    if (!cands.length) return;
+    const fam = (s) => g.reduce((a, m) => a + (ledger.pairs[pairKey(s.id, m.id)] || 0), 0);
+    cands.sort(
+      (a, b) =>
+        (load[a.id] || 0) - (load[b.id] || 0) ||
+        (ledger.plays[a.id] || 0) - (ledger.plays[b.id] || 0) ||
+        fam(a) - fam(b) ||
+        Math.random() - 0.5
+    );
+    const pick = cands[0];
+    const inst = instFor(pick, "harmony");
+    g.push({ ...pick, playing: inst, slot: "harmony" });
+    g.sort((a, b) => orderOf(a.playing) - orderOf(b.playing));
+    load[pick.id] = (load[pick.id] || 0) + 1;
+    enriched.push({ group: i, id: pick.id, name: pick.name, instrument: inst });
+  });
+  return { ...res, groups, load, enriched };
+}
+
 function attempt(roster, k, ledger, tries) {
   const out = [];
   for (let t = 0; t < tries; t++) {
@@ -226,7 +277,8 @@ function cost(res, ledger) {
 function bestDraw(roster, k, ledger, tries = 160) {
   const all = attempt(roster, k, ledger, tries);
   if (!all.length) return null;
-  return all.reduce((best, r) => (cost(r, ledger) < cost(best, ledger) ? r : best));
+  const best = all.reduce((b, r) => (cost(r, ledger) < cost(b, ledger) ? r : b));
+  return enrichHarmony(best, roster, ledger);
 }
 
 const ROLE_MISSING = { drums: "תופים", bass: "בס", harmony: "כלי הרמוני" };
@@ -665,6 +717,7 @@ export {
   rowsToAtt,
   applyLesson,
   addToDraw,
+  enrichHarmony,
   removeFromDraw,
   repairDraw,
   swapPlayers,

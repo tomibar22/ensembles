@@ -10,6 +10,7 @@ import {
   EMPTY,
   applyLesson,
   addToDraw,
+  enrichHarmony,
   removeFromDraw,
   repairDraw,
   swapPlayers,
@@ -242,7 +243,9 @@ test("הוצאה והחזרה לא משנות את סך הניגון בפנקס"
   const cls = "ט׳";
   const roster = ROSTERS[cls];
   const r = drawFor(cls);
-  const someone = r.groups.flat().find((m) => !m.teacher && m.slot === "melody");
+  // עומס 1 במפורש: תלמיד שמנגן בשני הרכבים משאיר שני חורים ביציאה,
+  // וחזרה ממלאת רק אחד — זה נבדק בנפרד ואינו המקרה כאן
+  const someone = r.groups.flat().find((m) => !m.teacher && r.load[m.id] === 1);
   const back = addToDraw(removeFromDraw(r, someone.id), roster.find((s) => s.id === someone.id), EMPTY);
   const before = applyLesson(roster, r, EMPTY);
   const after = applyLesson(roster, back, EMPTY);
@@ -571,6 +574,103 @@ test("יומן ריק וגיליון ריק לא מפילים", () => {
 test("שם הלשונית נגזר מהכיתה", () => {
   CLASSES.forEach((c) => assert.equal(ATT_TAB(c), `נוכחות ${c}`));
   assert.equal(new Set(CLASSES.map(ATT_TAB)).size, CLASSES.length, "שתי כיתות לאותה לשונית");
+});
+
+/* ================= כלי הרמוני שני: פסנתר וגיטרה ================= */
+
+const HARM = ["פסנתר", "גיטרה"];
+const harmIn = (g) => g.filter((mm) => HARM.includes(mm.playing)).map((mm) => mm.playing);
+
+test("פסנתר וגיטרה יחד אכן קורה בחלוקה המומלצת (רגרסיה)", () => {
+  // עד לשינוי הזה זה היה 0% — כל נגן הרמוני נדרש לכיסא האחד של הרכב אחר
+  CLASSES.forEach((cls) => {
+    let both = 0;
+    const draws = 20;
+    for (let i = 0; i < draws; i++)
+      recDraw(cls).groups.forEach((g) => {
+        if (harmIn(g).length > 1) both++;
+      });
+    assert.ok(both >= draws, `${cls}: רק ${both} הרכבים עם פסנתר וגיטרה ב-${draws} חלוקות`);
+  });
+});
+
+test("ההעשרה לא שוברת אף כלל", () => {
+  CLASSES.forEach((cls) => {
+    const pool = poolOf(cls);
+    for (let i = 0; i < 15; i++) {
+      const d = recDraw(cls);
+      d.groups.forEach((g, gi) => {
+        // ריתמיקה מלאה נשמרת
+        assert.equal(missingIn(g).length, 0, `${cls}/${gi + 1}: חסר תפקיד`);
+        // אין כלי ייחודי כפול, ואין תלמיד פעמיים באותו הרכב
+        HARM.concat(["תופים", "בס"]).forEach((inst) =>
+          assert.ok(g.filter((mm) => mm.playing === inst).length <= 1, `${cls}: שני ${inst}`)
+        );
+        const ids = g.map((mm) => mm.id);
+        assert.equal(new Set(ids).size, ids.length, `${cls}: תלמיד פעמיים באותו הרכב`);
+      });
+      Object.entries(d.load).forEach(([id, n]) =>
+        assert.ok(n <= MAX_LOAD, `${cls}: ${id} מנגן ב-${n} הרכבים`)
+      );
+      // המורה נכנס להרכב אחד בלבד
+      assert.ok((d.load["__teacher"] || 0) <= 1, `${cls}: המורה שובץ פעמיים`);
+      assert.ok(pool.length > 0);
+    }
+  });
+});
+
+test("אין העשרה כשמישהו יושב על הספסל", () => {
+  // כשיש ספסל, לתת לאחד לנגן פעמיים זה בדיוק הקיפוח שהפנקס נועד למנוע
+  const pool = poolOf("י״א");
+  let checked = 0;
+  for (let i = 0; i < 25; i++) {
+    const d = bestDraw(pool, 2, EMPTY); // k נמוך משאיר ספסל
+    if (!d || !d.bench.length) continue;
+    assert.ok(!d.enriched, "הועשר למרות שמישהו יושב על הספסל");
+    checked++;
+  }
+  assert.ok(checked > 5, `נבדקו רק ${checked} חלוקות עם ספסל`);
+});
+
+test("ההעשרה מצרפת להרכב הקטן לפני הגדול", () => {
+  const roster = ROSTERS["י״א"];
+  const seat = (id, inst, slot) => ({ id, name: id, instruments: [inst], roles: [ROLE_OF[inst] || "melody"], playing: inst, slot });
+  const base = (n) => [seat("d" + n, "תופים", "drums"), seat("b" + n, "בס", "bass"), seat("g" + n, "גיטרה", "harmony")];
+  const res = {
+    groups: [[...base(1), seat("x1", "חליל", "melody"), seat("x2", "אלט", "melody")], base(2)],
+    load: { d1: 1, b1: 1, g1: 1, x1: 1, x2: 1, d2: 1, b2: 1, g2: 1 },
+    bench: [],
+  };
+  // פסנתרן יחיד פנוי — חייב ללכת להרכב 2, הקטן מבין השניים
+  const pianist = roster.find((s) => s.instruments.includes("פסנתר"));
+  const out = enrichHarmony(res, [pianist], EMPTY);
+  assert.ok(out.enriched.length, "לא הייתה העשרה כלל");
+  assert.equal(out.enriched[0].group, 1, "ההעשרה הראשונה הלכה להרכב הגדול");
+  assert.deepEqual(harmIn(out.groups[1]).sort(), ["גיטרה", "פסנתר"].sort());
+});
+
+test("ההעשרה מעדיפה את מי שצבר הכי פחות בפנקס", () => {
+  const seat = (id, inst, slot) => ({ id, name: id, instruments: [inst], roles: [ROLE_OF[inst] || "melody"], playing: inst, slot });
+  const res = {
+    groups: [[seat("d", "תופים", "drums"), seat("b", "בס", "bass"), seat("g", "גיטרה", "harmony")]],
+    load: { d: 1, b: 1, g: 1, rich: 1, poor: 1 },
+    bench: [],
+  };
+  const cand = (id) => ({ id, name: id, instruments: ["פסנתר"], roles: ["harmony"] });
+  const ledger = { plays: { rich: 20, poor: 1 }, pairs: {}, lessons: 10 };
+  const out = enrichHarmony(res, [cand("rich"), cand("poor")], ledger);
+  assert.equal(out.enriched[0].id, "poor", "נבחר מי שכבר צבר הרבה");
+});
+
+test("capacity לא מושפעת מההעשרה", () => {
+  // ההעשרה רצה אחרי בחירת החלוקה בדיוק כדי שלא תצמצם את מספר ההרכבים
+  CLASSES.forEach((cls) => {
+    const pool = poolOf(cls);
+    const recs = new Set();
+    for (let i = 0; i < 10; i++) recs.add(capacity(pool).rec);
+    assert.equal(recs.size, 1, `${cls}: ההמלצה לא יציבה`);
+    assert.ok(bestDraw(pool, [...recs][0], EMPTY), `${cls}: אי אפשר לחלק לפי ההמלצה`);
+  });
 });
 
 /* ============================ capacity ============================ */
