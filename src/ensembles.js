@@ -60,6 +60,12 @@ const TABS = { "ט׳": "g9", "י״א": "g11" }; // לשוניות בגיליון
 const MAX_LOAD = 2;
 const MAX_GROUP = 6; // מעבר לזה ההרכב כבר לא באמת מנגן
 const MAX_GROUPS = 5; // יותר מזה לא מנוהל בשיעור אחד
+/* כמה הרכבים עדיף לכיתה, כשזה אפשרי. גובר על "כמה שיותר" של capacity.
+   בי״א 22 תלמידים ב-4 הרכבים דורשים 25 כיסאות — שני בסיסטים ממלאים ארבעה
+   כיסאות ושלושה מתופפים ארבעה — כלומר הרכב אחד של 7. זה מועדף על 5 הרכבים,
+   שבהם בסיסט אחד נדרש לשלושה הרכבים, ופסנתר וגיטרה יוצאים יחד בפחות הרכבים. */
+const PREFERRED_GROUPS = { "י״א": 4 };
+const PREFER_SLACK = 1; // ההעדפה סופגת נגן אחד מעל MAX_GROUP, לא יותר
 const TEACHER = {
   id: "__teacher",
   name: "תומר",
@@ -676,12 +682,28 @@ function rowsToLedger(cls, rows) {
 
 
 /**
+ * האם ההעדפה של הכיתה ישימה עם מי שנוכח היום. ישימה = יש חלוקה שבה איש
+ * לא יושב בחוץ, וההרכב הגדול חורג לכל היותר בנגן אחד מ-MAX_GROUP.
+ * כשהיא לא ישימה — למשל בשיעור עם הרבה נעדרים — חוזרים לחישוב הרגיל
+ * במקום להמליץ על מספר שיוציא תלמידים לספסל.
+ */
+function preferredK(roster, prefer, max) {
+  if (!prefer || prefer > max) return null;
+  const fits = attempt(roster, prefer, EMPTY, 40).some(
+    (r) => !r.bench.length && Math.max(...r.groups.map((g) => g.length)) <= MAX_GROUP + PREFER_SLACK
+  );
+  return fits ? prefer : null;
+}
+
+/**
  * כמה הרכבים אפשר להרכיב, וכמה מומלץ.
  * לכל k דוגמים כמה חלוקות ולא אחת — חלוקה בודדת עלולה לצאת גרועה במקרה
  * ולהפיל את ההמלצה. ואם אף k לא עומד בכל התנאים בוחרים את הטוב שנמצא
  * (הכי מעט יושבים, ואז ההרכב הגדול הקטן ביותר) במקום ליפול ל-1.
+ * `prefer` הוא ההעדפה של הכיתה (PREFERRED_GROUPS); היא גוברת על החישוב
+ * כשהיא ישימה, ו-max לא מושפע ממנה — המורה עדיין יכול לבחור ידנית אחרת.
  */
-function capacity(roster) {
+function capacity(roster, prefer) {
   const hardMax = Math.min(MAX_GROUPS, Math.max(1, Math.floor(roster.length / 4)));
   let max = hardMax;
   while (max > 1 && !attempt(roster, max, EMPTY, 25).length) max--;
@@ -702,7 +724,8 @@ function capacity(roster) {
       break;
     }
   }
-  return { max, rec: rec ?? (fallback ? fallback.k : max) };
+  const auto = rec ?? (fallback ? fallback.k : max);
+  return { max, rec: preferredK(roster, prefer, max) ?? auto };
 }
 
 const ROLE_LABEL = { drums: "מתופפים", bass: "בסיסטים", harmony: "כלים הרמוניים" };
@@ -732,6 +755,7 @@ export {
   MAX_LOAD,
   MAX_GROUP,
   MAX_GROUPS,
+  PREFERRED_GROUPS,
   ROLE_OF,
   ROLE_LABEL,
   ORDER,

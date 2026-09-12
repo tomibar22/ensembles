@@ -7,6 +7,7 @@ import {
   MAX_LOAD,
   MAX_GROUP,
   MAX_GROUPS,
+  PREFERRED_GROUPS,
   ROLE_OF,
   EMPTY,
   applyLesson,
@@ -925,6 +926,46 @@ test("נגן יחיד בתפקיד חיוני מנגן בכל ההרכבים (ר
     assert.ok(g.some((mm) => ROLE_OF[mm.playing] === "drums"), `הרכב ${i + 1} נשאר בלי תופים`)
   );
   assert.equal(d.load[drummer.id], rec, "המתופף לא ניגן בכל ההרכבים");
+});
+
+test("ההעדפה של הכיתה גוברת על החישוב, ועדיין מחלקת את כולם", () => {
+  /* בי״א המורה מעדיף 4 הרכבים, אף שהחישוב היה בוחר 5. ההעדפה שווה משהו
+     רק אם היא באמת מתחלקת: אף אחד לא יושב בחוץ, ובכל הרכב ריתמיקה מלאה. */
+  Object.entries(PREFERRED_GROUPS).forEach(([cls, prefer]) => {
+    const pool = poolOf(cls);
+    const { max, rec } = capacity(pool, prefer);
+    assert.equal(rec, prefer, `${cls}: ההעדפה ${prefer} לא כובדה (rec=${rec})`);
+    assert.ok(prefer <= max, `${cls}: ההעדפה ${prefer} מעל המקסימום ${max}`);
+    const d = bestDraw(pool, rec, EMPTY);
+    assert.ok(d, `${cls}: אי אפשר לחלק ל-${rec}`);
+    assert.equal(d.bench.length, 0, `${cls}: ${d.bench.length} תלמידים על הספסל בהעדפה`);
+    assert.equal(d.groups.length, prefer, `${cls}: יצאו ${d.groups.length} הרכבים`);
+    d.groups.forEach((g, i) =>
+      ["drums", "bass", "harmony"].forEach((r) =>
+        assert.ok(g.some((m) => ROLE_OF[m.playing] === r), `${cls}: הרכב ${i + 1} בלי ${r}`)
+      )
+    );
+  });
+});
+
+test("ההעדפה לא מרחיבה את המקסימום ולא נכפית כשאי אפשר", () => {
+  Object.entries(PREFERRED_GROUPS).forEach(([cls, prefer]) => {
+    const pool = poolOf(cls);
+    assert.equal(capacity(pool, prefer).max, capacity(pool).max, `${cls}: ההעדפה שינתה את max`);
+    /* שיעור עם הרבה נעדרים: אם ההעדפה עדיין הייתה נכפית, תלמידים היו
+       יוצאים לספסל או שהחלוקה כלל לא הייתה מתקיימת. */
+    const few = pool.slice(0, 4 * prefer - 5);
+    const { max, rec } = capacity(few, prefer);
+    assert.ok(rec <= max, `${cls}: rec=${rec} מעל max=${max} בכיתה חסרה`);
+    if (max < prefer) assert.equal(rec, capacity(few).rec, `${cls}: ההעדפה דלפה לכיתה חסרה`);
+  });
+});
+
+test("כיתה בלי העדפה ממשיכה לפי החישוב", () => {
+  CLASSES.filter((cls) => !PREFERRED_GROUPS[cls]).forEach((cls) => {
+    const pool = poolOf(cls);
+    assert.equal(capacity(pool, PREFERRED_GROUPS[cls]).rec, capacity(pool).rec, cls);
+  });
 });
 
 test("ההמלצה מכבדת את גודל ההרכב כשאפשר, ואחרת בוחרת את הטוב ביותר", () => {

@@ -22,6 +22,7 @@ import {
   ROLE_MISSING,
   bestDraw,
   capacity,
+  PREFERRED_GROUPS,
   bottleneck,
   encodeLedger,
   decodeLedger,
@@ -154,7 +155,8 @@ export default function App() {
   const [absent, setAbsent] = useState(() => new Set(loadAbsent(CLASSES[0])));
   const present = useMemo(() => roster.filter((s) => !absent.has(s.id)), [roster, absent]);
   const pool = useMemo(() => (teacherOn ? [...present, TEACHER] : present), [present, teacherOn]);
-  const caps = useMemo(() => capacity(pool), [pool]);
+  // ההעדפה תלויה בכיתה, ולכן נמסרת ל-capacity ולא יושבת בתוכה
+  const caps = useMemo(() => capacity(pool, PREFERRED_GROUPS[cls]), [pool, cls]);
   const neck = useMemo(() => bottleneck(pool), [pool]);
   // k נגזר ולא נשמר: כך הוא לא נשאר גדול מהאפשרי אחרי שסימנו נעדרים
   const [kPick, setKPick] = useState(null); // null = ללכת אחרי ההמלצה
