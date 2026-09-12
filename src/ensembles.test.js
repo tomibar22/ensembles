@@ -38,6 +38,16 @@ const poolOf = (cls, teacher = true) => (teacher ? [...ROSTERS[cls], TEACHER] : 
 /* מספר ההרכבים נגזר מהנתונים ולא מקובע: עריכת רשימת התלמידים משנה את
    מה שאפשר, ובדיקה שמקבעת מספר נשברת בכל שינוי כזה. */
 const recK = (cls) => capacity(poolOf(cls)).rec;
+/* חריגה מ-MAX_LOAD חוקית רק כשתפקיד חיוני לא ניתן לכיסוי אחרת —
+   למשל בסיסט יחיד בכיתה שחייב לנגן בכל ההרכבים. */
+const overloadOk = (pool, k, id, n) => {
+  if (n <= MAX_LOAD) return true;
+  const me = pool.find((s) => s.id === id);
+  if (!me) return false;
+  return ["drums", "bass", "harmony"].some(
+    (r) => me.roles.includes(r) && pool.filter((s) => s.roles.includes(r)).length * MAX_LOAD < k
+  );
+};
 const recDraw = (cls, ledger = EMPTY) => bestDraw(poolOf(cls), recK(cls), ledger);
 const each = (fn) => CLASSES.forEach((cls) => [true, false].forEach((t) => fn(cls, t)));
 
@@ -91,7 +101,10 @@ test("כל הרכב מקבל ריתמיקה מלאה, ואיש לא חורג מ�
         assert.equal(new Set(ids).size, ids.length, `${cls}: תלמיד פעמיים באותו הרכב`);
       }
       Object.entries(r.load).forEach(([id, n]) =>
-        assert.ok(n <= MAX_LOAD, `${cls}: ${id} מנגן ב-${n} הרכבים`)
+        assert.ok(
+          overloadOk(pool, rec, id, n),
+          `${cls}: ${id} מנגן ב-${n} הרכבים בלי שתפקיד חיוני חייב זאת`
+        )
       );
     }
   });
@@ -244,12 +257,18 @@ test("מי שממלא תפקיד חסר מקבל עדיפות על ההרכב ה
   );
 });
 
-test("תלמיד שמנגן בשני הרכבים משאיר שני חורים כשהוא יוצא", () => {
-  const r = drawFor("ט׳");
-  const twice = r.groups.flat().find((m) => r.load[m.id] === 2 && !m.teacher);
-  if (!twice) return; // לא בכל חלוקה יש כזה
+test("מתופף שמנגן בשני הרכבים משאיר שני חורים כשהוא יוצא", () => {
+  /* דווקא מתופף: שני הכיסאות שלו חיוניים ואין לו מחליף באותו הרכב.
+     נגן הרמוני שהועשר משאיר חור אחד בלבד, כי בהרכב השני נשאר הכלי הראשי. */
+  let r, twice;
+  for (let i = 0; i < 30 && !twice; i++) {
+    r = drawFor("ט׳");
+    twice = r.groups.flat().find((m) => r.load[m.id] === 2 && !m.teacher && m.playing === "תופים");
+  }
+  if (!twice) return;
   const out = removeFromDraw(r, twice.id);
   assert.equal(out.broken.length, 2, "לא דווח על שני ההרכבים");
+  out.broken.forEach((b) => assert.ok(b.missing.includes("drums")));
   // החזרה ממלאת אחד מהם — המורה רואה בהודעה שהשני עדיין חסר
   const back = addToDraw(out, twice, EMPTY);
   assert.equal(removeFromDraw(back, "אף-אחד").broken.length, 1);
@@ -352,9 +371,11 @@ test("אף אחד לא חורג מהמכסה בגלל ההשלמה", () => {
   const r = bestDraw([...roster, TEACHER], recK("ט׳"), EMPTY);
   const victim = r.groups.flat().find((m) => m.playing === "תופים" && !m.teacher);
   const present = roster.filter((s) => s.id !== victim.id);
-  const fixed = repairDraw(removeFromDraw(r, victim.id), [...present, TEACHER], EMPTY);
+  const pool = [...present, TEACHER];
+  const k = r.groups.length;
+  const fixed = repairDraw(removeFromDraw(r, victim.id), pool, EMPTY);
   Object.entries(fixed.load).forEach(([id, n]) =>
-    assert.ok(n <= MAX_LOAD, `${id} מנגן ב-${n} הרכבים`)
+    assert.ok(overloadOk(pool, k, id, n), `${id} מנגן ב-${n} הרכבים בלי הצדקה`)
   );
 });
 
@@ -692,7 +713,11 @@ test("ההעשרה לא שוברת אף כלל", () => {
         assert.equal(new Set(ids).size, ids.length, `${cls}: תלמיד פעמיים באותו הרכב`);
       });
       Object.entries(d.load).forEach(([id, n]) =>
-        assert.ok(n <= MAX_LOAD, `${cls}: ${id} מנגן ב-${n} הרכבים`)
+        assert.ok(overloadOk(pool, recK(cls), id, n), `${cls}: ${id} מנגן ב-${n} הרכבים בלי הצדקה`)
+      );
+      // ההעשרה עצמה לעולם לא חורגת מהמכסה — היא רשות, לא חובה
+      (d.enriched || []).forEach((e) =>
+        assert.ok(d.load[e.id] <= MAX_LOAD, `${cls}: ההעשרה העלתה את ${e.name} ל-${d.load[e.id]}`)
       );
       // המורה נכנס להרכב אחד בלבד
       assert.ok((d.load["__teacher"] || 0) <= 1, `${cls}: המורה שובץ פעמיים`);
@@ -776,14 +801,22 @@ test("ההמלצה תמיד בטווח, וניתנת לחלוקה בפועל", (
   });
 });
 
-test("כשאין k מושלם בוחרים את הטוב שנמצא ולא נופלים ל-1", () => {
-  // רשימה עם מתופף אחד: התקרה 2, וההמלצה חייבת להיות 2 ולא 1
+test("נגן יחיד בתפקיד חיוני מנגן בכל ההרכבים (רגרסיה)", () => {
+  /* הדרישה לריתמיקה מלאה גוברת על MAX_LOAD: בסיסט או מתופף יחיד בכיתה
+     ינגן בכל ההרכבים, כי אחרת חלקם יישארו בלי התפקיד. עד לשינוי הזה
+     התקרה הייתה 2 הרכבים בלבד. */
   const one = ROSTERS["י״א"].filter(
     (s) => !["נועם-בנימיני", "איתן-יעקובסון"].includes(s.id)
   );
-  const { max, rec } = capacity(one);
-  assert.equal(max, 2);
-  assert.equal(rec, 2);
+  const drummer = one.find((s) => s.roles.includes("drums"));
+  const { rec } = capacity(one);
+  assert.ok(rec > MAX_LOAD, `rec=${rec} — המתופף היחיד לא כיסה יותר מ-${MAX_LOAD} הרכבים`);
+  const d = bestDraw(one, rec, EMPTY);
+  assert.ok(d, "לא נוצרה חלוקה");
+  d.groups.forEach((g, i) =>
+    assert.ok(g.some((mm) => ROLE_OF[mm.playing] === "drums"), `הרכב ${i + 1} נשאר בלי תופים`)
+  );
+  assert.equal(d.load[drummer.id], rec, "המתופף לא ניגן בכל ההרכבים");
 });
 
 test("ההמלצה מכבדת את גודל ההרכב כשאפשר, ואחרת בוחרת את הטוב ביותר", () => {
@@ -807,15 +840,21 @@ test("ההמלצה מכבדת את גודל ההרכב כשאפשר, ואחרת 
 
 /* ============================ צוואר הבקבוק ============================ */
 
-test("התפקיד הנדיר קובע את התקרה", () => {
+test("תפקיד חיוני חוסם רק כשאין בו אף נגן", () => {
   const oneDrummer = ROSTERS["י״א"].filter(
     (s) => !["נועם-בנימיני", "איתן-יעקובסון"].includes(s.id)
   );
   const b = bottleneck(oneDrummer);
   assert.equal(b.role, "drums");
   assert.equal(b.count, 1);
-  assert.equal(b.limit, MAX_LOAD);
-  assert.ok(capacity(oneDrummer).max <= b.limit, "התקרה בפועל חרגה מהחסם התיאורטי");
+  assert.equal(b.missing, false, "מתופף אחד אינו חוסם — הוא מכסה כמה הרכבים שצריך");
+  assert.ok(capacity(oneDrummer).max > 1);
+
+  const noDrums = ROSTERS["י״א"].filter((s) => !s.roles.includes("drums"));
+  const b2 = bottleneck(noDrums);
+  assert.equal(b2.role, "drums");
+  assert.equal(b2.missing, true);
+  assert.equal(bestDraw(noDrums, 1, EMPTY), null, "נוצרה חלוקה בלי מתופף");
 });
 
 /* ============================ הגיבוי ============================ */

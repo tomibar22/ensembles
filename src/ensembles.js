@@ -53,7 +53,11 @@ const orderOf = (i) => (ORDER.indexOf(i) === -1 ? 99 : ORDER.indexOf(i));
 const CLASSES = Object.keys(RAW);
 const KEYS = { "ט׳": "ens-ledger-g9", "י״א": "ens-ledger-g11" };
 const TABS = { "ט׳": "g9", "י״א": "g11" }; // לשוניות בגיליון
-const MAX_LOAD = 2; // תלמיד לא ינגן ביותר משני הרכבים באותו שיעור
+/* תלמיד לא ינגן ביותר משני הרכבים באותו שיעור — אלא אם אין ברירה:
+   הדרישה לתופים, בס וכלי הרמוני בכל הרכב גוברת. בסיסט יחיד בכיתה ינגן
+   בכל ההרכבים, כי אחרת חלקם יישארו בלי בס. ההקלה תקפה רק לתפקידים
+   החיוניים; צירוף מלודי והעשרה לעולם לא יחרגו. */
+const MAX_LOAD = 2;
 const TEACHER = {
   id: "__teacher",
   name: "תומר",
@@ -130,9 +134,10 @@ function makeGroups(roster, k, ledger) {
   for (const role of roles) {
     const cands = roster.filter((s) => s.roles.includes(role));
     for (const g of shuffle([...Array(k).keys()])) {
-      const ok = cands.filter(
-        (s) => (load[s.id] || 0) < MAX_LOAD && !inGroup(s, g) && free(g, instFor(s, role))
-      );
+      const fits = (s) => !inGroup(s, g) && free(g, instFor(s, role));
+      let ok = cands.filter((s) => (load[s.id] || 0) < MAX_LOAD && fits(s));
+      // אין מי שפנוי במכסה? התפקיד חייב להתמלא, ולכן חורגים ממנה
+      if (!ok.length) ok = cands.filter(fits);
       if (!ok.length) return null;
       // סדר: תלמיד שעוד לא ניגן היום → המורה → תלמיד שיכפיל הרכב
       const rank = (s) => (s.teacher ? 0.5 : load[s.id] || 0);
@@ -361,13 +366,12 @@ function repairDraw(res, pool, ledger) {
   const filled = [];
   groups.forEach((g, i) => {
     for (const role of missingRoles(g)) {
-      const cands = pool.filter(
-        (s) =>
-          s.roles.includes(role) &&
-          !g.some((m) => m.id === s.id) &&
-          (load[s.id] || 0) < MAX_LOAD &&
-          !g.some((m) => m.playing === instFor(s, role))
-      );
+      const fits = (s) =>
+        s.roles.includes(role) &&
+        !g.some((m) => m.id === s.id) &&
+        !g.some((m) => m.playing === instFor(s, role));
+      let cands = pool.filter((s) => fits(s) && (load[s.id] || 0) < MAX_LOAD);
+      if (!cands.length) cands = pool.filter(fits); // התפקיד גובר על המכסה
       if (!cands.length) continue;
       const rank = (s) => (s.teacher ? 0.5 : load[s.id] || 0);
       const debt = (s) => ledger.plays[s.id] || 0;
@@ -686,17 +690,19 @@ function capacity(roster) {
 
 const ROLE_LABEL = { drums: "מתופפים", bass: "בסיסטים", harmony: "כלים הרמוניים" };
 
-/* מה חוסם את מספר ההרכבים. כל הרכב צריך תופים, בס וכלי הרמוני, ותלמיד
-   מכסה לכל היותר MAX_LOAD הרכבים — כך שהתפקיד הנדיר קובע את התקרה.
-   בלי ההסבר הזה ירידה פתאומית מ-5 הרכבים ל-2 אחרי סימון נעדרים נראית כמו תקלה. */
+/* מה חוסם את מספר ההרכבים. מאז שהתפקידים החיוניים גוברים על MAX_LOAD,
+   נגן יחיד בתפקיד מכסה כמה הרכבים שצריך — ולכן מספר הנגנים בתפקיד כבר
+   אינו מגביל. מה שחוסם הוא תפקיד שאין לו אף נגן נוכח.
+   מחזיר את התפקיד החיוני הדל ביותר; missing אומר שהוא ריק לגמרי,
+   ואז אי אפשר להרכיב אף הרכב. */
 function bottleneck(pool) {
-  let limit = Infinity;
+  let count = Infinity;
   let role = null;
   for (const r of ["drums", "bass", "harmony"]) {
     const n = pool.filter((s) => s.roles.includes(r)).length;
-    if (n * MAX_LOAD < limit) (limit = n * MAX_LOAD), (role = r);
+    if (n < count) (count = n), (role = r);
   }
-  return { limit, role, count: limit / MAX_LOAD };
+  return { role, count, missing: count === 0 };
 }
 
 export {

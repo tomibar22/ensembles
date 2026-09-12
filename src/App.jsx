@@ -94,7 +94,7 @@ const C = {
 };
 const TINT = { "תופים": C.rose, "בס": C.teal, "פסנתר": C.brass, "גיטרה": C.brass };
 
-function Chip({ m, twice, onClick, state }) {
+function Chip({ m, load, onClick, state }) {
   const tint = m.teacher ? C.teal : TINT[m.playing] || C.dim;
   const picked = state === "selected";
   const blocked = state === "blocked";
@@ -128,9 +128,9 @@ function Chip({ m, twice, onClick, state }) {
       <span style={{ fontSize: 16, fontWeight: 500 }}>{m.name}</span>
       {m.teacher && <span style={{ color: C.teal, fontSize: 12 }}>מורה</span>}
       <span style={{ color: tint, fontSize: 14 }}>{m.playing}</span>
-      {twice && (
+      {load > 1 && (
         <span
-          title="מנגן בשני הרכבים היום"
+          title={`מנגן ב-${load} הרכבים היום`}
           style={{
             background: C.brass + "26",
             color: C.brass,
@@ -141,7 +141,7 @@ function Chip({ m, twice, onClick, state }) {
             alignSelf: "center",
           }}
         >
-          ×2
+          ×{load}
         </span>
       )}
     </button>
@@ -578,7 +578,7 @@ export default function App() {
 
         {showHelp && (
           <div style={{ color: C.dim, fontSize: 14, margin: "12px 0 0", lineHeight: 1.7, borderTop: `1px solid ${C.line}`, paddingTop: 12 }}>
-            תופים, בס וכלי הרמוני בכל הרכב. מי שנדרש פעמיים מסומן ×2, והפנקס דואג שזה יתחלף בין
+            תופים, בס וכלי הרמוני בכל הרכב. מי שנדרש ביותר מהרכב אחד מסומן במספר ההרכבים שלו, והפנקס דואג שזה יתחלף בין
             השיעורים. תומר נכנס להרכב אחד ואינו נספר בפנקס.
             {!ledger.lessons && " אחרי כל שיעור לחץ ״שמור״, וההגרלות הבאות יתקנו את מי שקופח."}
           </div>
@@ -638,7 +638,7 @@ export default function App() {
             {absent.size > 0 && (
               <p style={{ color: C.dim, fontSize: 13, margin: "12px 0 0", lineHeight: 1.6 }}>
                 {present.length} נוכחים · אפשר עד {caps.max} הרכבים
-                {neck.limit <= caps.max ? ` — ${ROLE_LABEL[neck.role]} נוכחים: ${neck.count}` : ""}.
+                {neck.missing ? ` — אין ${ROLE_LABEL[neck.role]} נוכחים` : ""}.
               </p>
             )}
             {/* דביק: ברשימה של 22 שמות הכפתור נפל מתחת לקיפול במסך טלפון */}
@@ -744,7 +744,7 @@ export default function App() {
                   <Chip
                     key={m.id + m.playing}
                     m={m}
-                    twice={res.load[m.id] > 1}
+                    load={res.load[m.id] || 1}
                     state={chipState(i, m.id)}
                     onClick={() => pickChip(i, m)}
                   />
