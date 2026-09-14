@@ -150,6 +150,54 @@ const board2 = await p
   .allTextContents();
 check(!board2.some((t) => t.trim() === "מעיין"), "לוח הנוכחות מציג את ט׳ ולא את י״א");
 
+/* ================== איחור: מי שהגיע רק אחרי החלוקה ==================
+
+   המסלול שהמורה עובר בפועל: מסמנים שניים כחסרים, מחלקים, ואז אחד מהם
+   נכנס לכיתה ומוחזר ללוח. ההפרש בין הנוכחות בזמן החלוקה לנוכחות בסוף
+   הוא כל מה שמבדיל "איחור" מ"חיסור", והוא חי בזיכרון בלבד — אם הוא
+   נשבר, הגיליון פשוט מקבל חיסור במקום איחור בלי שום שגיאה. */
+const LATE = "אביגיל";
+const OUT = "עדאל";
+
+await p.getByRole("button", { name: LATE, exact: true }).click();
+await p.getByRole("button", { name: OUT, exact: true }).click();
+await p.waitForTimeout(200);
+await p.getByRole("button", { name: /חלק את/ }).click();
+await p.waitForTimeout(900);
+
+// אביגיל נכנסת לכיתה אחרי שההרכבים כבר חולקו
+await p.getByRole("button", { name: "שנה נוכחות" }).click();
+await p.waitForTimeout(200);
+await p.getByRole("button", { name: LATE, exact: true }).click();
+await p.waitForTimeout(400);
+await p.getByRole("button", { name: /שמור את השיעור/ }).click();
+await p.waitForTimeout(1200);
+
+const att = ((await p.evaluate(() => window.__sheet))["נוכחות ט׳"] || []).slice(1);
+const cell = (n, i) => (att.find((r) => r[2] === n) || [])[i] || "";
+console.log("יומן נוכחות ט׳:", att.map((r) => `${r[2]}=${r[4]}`).join(", ") || "(ריק)");
+
+check(cell(LATE, 4) === "איחור", `${LATE} נרשמה בגיליון כאיחור (בפועל: ${cell(LATE, 4) || "לא נרשמה"})`);
+check(cell(OUT, 4) === "חיסור", `${OUT} נרשם בגיליון כחיסור (בפועל: ${cell(OUT, 4) || "לא נרשם"})`);
+check(att.length === 2, `ביומן רק שתי שורות — נוכח רגיל אינו נרשם (בפועל ${att.length})`);
+check(cell(LATE, 3) !== "", "שורת האיחור נושאת מזהה, ולא רק שם");
+
+/* ותיקון נוכחות אחרי השמירה: מאיה יוצאת באמצע, והשיעור נשמר שוב.
+   זו השמירה שמחליפה את שורות היומן — ואם היא מוסיפה במקום להחליף,
+   הגיליון מתמלא בכפילויות של אותו שיעור. */
+await p.getByRole("button", { name: "מאיה", exact: true }).click();
+await p.waitForTimeout(400);
+await p.getByRole("button", { name: /עדכן את השיעור/ }).click();
+await p.waitForTimeout(1200);
+
+const again = ((await p.evaluate(() => window.__sheet))["נוכחות ט׳"] || []).slice(1);
+const cell2 = (n, i) => (again.find((r) => r[2] === n) || [])[i] || "";
+console.log("אחרי העדכון:", again.map((r) => `${r[2]}=${r[4]}`).join(", "));
+check(again.length === 3, `העדכון החליף את שורות השיעור ולא הכפיל אותן (בפועל ${again.length})`);
+check(cell2("מאיה", 4) === "יצא", `מאיה נרשמה כיצאה באמצע (בפועל: ${cell2("מאיה", 4) || "לא נרשמה"})`);
+check(cell2(LATE, 4) === "איחור", "האיחור נשמר גם אחרי העדכון");
+check(new Set(again.map((r) => r[1])).size === 1, "כל השורות שייכות לאותו מספר שיעור");
+
 await b.close();
 console.log(failures ? `\n${failures} בדיקות נכשלו` : "\nהכול עבר");
 process.exit(failures ? 1 : 0);

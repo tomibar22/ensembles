@@ -1030,6 +1030,79 @@ function capacity(pool) {
   return { max, rec, options: opts };
 }
 
+/* ============================ מצב השיעור ============================
+
+   שמונה ערכים שתמיד השתנו יחד: החלוקה, האם נשמרה, הפנקס שלפניה, תמונת
+   הנוכחות ברגע החלוקה, היום שבו נערכה, השגיאה, ההודעה והנגן שנבחר
+   להחלפה. כל מסלול היה צריך לזכור את כל ה-setters, ומסלול ששכח אחד
+   מהם השאיר על המסך הודעה או בחירה ממצב קודם.
+
+   reducer הופך כל שינוי למעבר אחד בעל שם, ולכן אי אפשר לשכוח חצי ממנו.
+   הוא כאן ולא ב-App.jsx כדי שיהיה אפשר לבדוק אותו ישירות: מחזור החיים
+   של `atDraw` הוא מה שקובע מי נרשם כמאחר, ובלי בדיקה הוא נשבר בשקט.
+   ================================================================== */
+
+const NO_LESSON = {
+  res: null,
+  saved: false,
+  base: null,
+  atDraw: null,
+  day: null,
+  err: "",
+  msg: "",
+  sel: null,
+};
+
+function lessonReducer(st, a) {
+  switch (a.type) {
+    // כיתה אחרת, רשימה שנערכה, או פנקס שנטען — הכול מתחיל מחדש
+    case "reset":
+      return NO_LESSON;
+    // החלוקה יורדת מהמסך, אבל השיעור עצמו נמשך (הפנקס שלפניו נשמר)
+    case "cleared":
+      return { ...st, res: null, saved: false, err: "", msg: "", sel: null };
+    case "drew": {
+      /* תמונת הנוכחות נלקחת בחלוקה הראשונה של השיעור ונשמרת בחלוקה
+         חוזרת, אחרת "חלק מחדש" היה מוחק את רישום האיחורים.
+
+         אבל היא לא נגררת ליום אחר. אפליקציה שנשארה פתוחה משיעור לשיעור
+         (טלפון, PWA) הייתה מגיעה לשיעור הבא עם התמונה של הקודם, ואז
+         רושמת כמאחר את מי שנעדר בשבוע שעבר ומפספסת את מי שאיחר היום.
+         זה בדיוק מה ש-loadAbsent כבר נזהר ממנו במטמון — ובזיכרון זה
+         נשאר פרוץ. מאותה סיבה גם `base` מתאפס: בלעדיו השמירה של היום
+         הייתה נכתבת על השיעור של השבוע שעבר במקום להוסיף לו. */
+      const sameDay = st.day === null || st.day === a.day;
+      return {
+        ...st,
+        res: a.res,
+        err: a.err,
+        saved: false,
+        msg: "",
+        sel: null,
+        day: a.day ?? st.day,
+        base: sameDay ? st.base : null,
+        atDraw: (sameDay && st.atDraw) || a.atDraw,
+      };
+    }
+    // עריכה ידנית, או מי שהגיע/יצא באמצע — החלוקה משתנה בלי להיבנות מחדש
+    case "edit":
+      return { ...st, res: a.res ?? st.res, saved: false, err: "", msg: a.msg || "", sel: null };
+    case "msg":
+      return { ...st, msg: a.msg };
+    case "select":
+      return { ...st, sel: a.sel, msg: a.sel ? "" : st.msg };
+    case "saved":
+      return { ...st, saved: true, base: a.base };
+    case "undone":
+      return { ...st, saved: false, base: null };
+    // הפנקס נמשך מהגיליון: השיעור שבזיכרון כבר לא יושב על אותו בסיס
+    case "rebased":
+      return { ...st, base: null, saved: false };
+    default:
+      return st;
+  }
+}
+
 
 export {
   SEED,
@@ -1066,6 +1139,8 @@ export {
   attToRows,
   rowsToAtt,
   attendanceSummary,
+  NO_LESSON,
+  lessonReducer,
   applyLesson,
   addToDraw,
   enrichHarmony,

@@ -13,6 +13,8 @@ import {
   EMPTY,
   applyLesson,
   addToDraw,
+  NO_LESSON,
+  lessonReducer,
   enrichHarmony,
   removeFromDraw,
   repairDraw,
@@ -792,6 +794,64 @@ test("יומן של שיעורים אחרים לא נפגע", () => {
   const again = mergeAttendance(log, 2, lessonAttendance(roster, S(), S(), 2, "2026-09-08"));
   assert.equal(again.length, 1, "שיעור 1 נמחק");
   assert.equal(again[0].lesson, 1);
+});
+
+/* ===================== מחזור החיים של תמונת הנוכחות =====================
+
+   `atDraw` הוא מה שקובע מי נרשם כמאחר: מי שסומן חסר בחלוקה והוחזר אחריה.
+   הוא חי ב-reducer של השיעור, ולכן הבדיקות כאן על ה-reducer עצמו.
+   ==================================================================== */
+
+const drew = (st, day, absent) =>
+  lessonReducer(st, { type: "drew", res: { groups: [] }, err: "", day, atDraw: new Set(absent) });
+
+test("חלוקה חוזרת באותו יום לא מוחקת את רישום האיחורים", () => {
+  const a = drew(NO_LESSON, "2026-09-07", ["דני"]);
+  // דני הגיע, ולכן בחלוקה החוזרת הוא כבר לא בסט הנעדרים
+  const b = drew(a, "2026-09-07", []);
+  assert.deepEqual([...b.atDraw], ["דני"], "תמונת הנוכחות של תחילת השיעור אבדה");
+});
+
+test("חלוקה ביום אחר מתחילה שיעור חדש ולא יורשת את הקודם", () => {
+  let st = drew(NO_LESSON, "2026-09-07", ["דני"]);
+  st = lessonReducer(st, { type: "saved", base: { plays: {}, pairs: {}, lessons: 4 } });
+
+  // שבוע אחרי, באותה אפליקציה שלא נסגרה: היום נעדרת נועה
+  st = drew(st, "2026-09-14", ["נועה"]);
+  assert.deepEqual([...st.atDraw], ["נועה"], "תמונת הנוכחות של השיעור הקודם נגררה");
+  assert.equal(st.base, null, "השמירה של היום הייתה נכתבת על השיעור הקודם");
+  assert.equal(st.saved, false);
+  assert.equal(st.day, "2026-09-14");
+});
+
+test("שיעור שנשאר פתוח משבוע שעבר לא הופך נעדר למאחר", () => {
+  const roster = ROSTERS["ט׳"];
+  const [old, now] = roster.map((x) => x.id);
+
+  // שבוע שעבר: old נעדר לכל אורך השיעור
+  let st = drew(NO_LESSON, "2026-09-07", [old]);
+  st = lessonReducer(st, { type: "saved", base: EMPTY });
+
+  // היום: now נעדר בחלוקה, ומגיע באיחור אחריה. old נוכח מההתחלה.
+  st = drew(st, "2026-09-14", [now]);
+  const log = lessonAttendance(roster, st.atDraw, new Set(), 5, "2026-09-14");
+  const of = (id) => (log.find((e) => e.id === id) || {}).status;
+  assert.equal(of(now), "late", "מי שבאמת איחר היום לא נרשם");
+  assert.equal(of(old), undefined, `מי שנעדר בשבוע שעבר נרשם היום כ-${of(old)}`);
+  assert.equal(log.length, 1);
+});
+
+test("חלוקה שנכשלה לא קובעת תמונת נוכחות", () => {
+  const failed = lessonReducer(NO_LESSON, {
+    type: "drew",
+    res: null,
+    err: "אי אפשר",
+    day: "2026-09-14",
+    atDraw: null,
+  });
+  assert.equal(failed.atDraw, null);
+  // והחלוקה שמצליחה אחריה, באותו יום, היא זו שקובעת
+  assert.deepEqual([...drew(failed, "2026-09-14", ["דני"]).atDraw], ["דני"]);
 });
 
 test("שורות הגיליון הלוך ושוב", () => {

@@ -22,6 +22,8 @@ import {
   mergeAttendance,
   attToRows,
   rowsToAtt,
+  NO_LESSON,
+  lessonReducer,
   attendanceSummary,
   addToDraw,
   removeFromDraw,
@@ -114,57 +116,6 @@ const saveAtt = (cls, log) => store.set(ATT_KEY(cls), JSON.stringify(log));
 
 /* ============================ תצוגה ============================ */
 
-/* ============================ מצב השיעור ============================
-
-   שבעה ערכים שתמיד השתנו יחד: החלוקה, האם נשמרה, הפנקס שלפניה, תמונת
-   הנוכחות ברגע החלוקה, השגיאה, ההודעה והנגן שנבחר להחלפה. כל מסלול היה
-   צריך לזכור את כל חמשת ה-setters, ומסלול ששכח אחד מהם השאיר על המסך
-   הודעה או בחירה ממצב קודם.
-
-   reducer הופך כל שינוי למעבר אחד בעל שם, ולכן אי אפשר לשכוח חצי ממנו.
-   ================================================================== */
-
-const NO_LESSON = { res: null, saved: false, base: null, atDraw: null, err: "", msg: "", sel: null };
-
-function lessonReducer(st, a) {
-  switch (a.type) {
-    // כיתה אחרת, רשימה שנערכה, או פנקס שנטען — הכול מתחיל מחדש
-    case "reset":
-      return NO_LESSON;
-    // החלוקה יורדת מהמסך, אבל השיעור עצמו נמשך (הפנקס שלפניו נשמר)
-    case "cleared":
-      return { ...st, res: null, saved: false, err: "", msg: "", sel: null };
-    case "drew":
-      return {
-        ...st,
-        res: a.res,
-        err: a.err,
-        saved: false,
-        msg: "",
-        sel: null,
-        // תמונת הנוכחות נלקחת בחלוקה הראשונה ונשמרת גם בחלוקה חוזרת,
-        // אחרת חלוקה מחדש הייתה מוחקת את רישום האיחורים
-        atDraw: st.atDraw || a.atDraw,
-      };
-    // עריכה ידנית, או מי שהגיע/יצא באמצע — החלוקה משתנה בלי להיבנות מחדש
-    case "edit":
-      return { ...st, res: a.res ?? st.res, saved: false, err: "", msg: a.msg || "", sel: null };
-    case "msg":
-      return { ...st, msg: a.msg };
-    case "select":
-      return { ...st, sel: a.sel, msg: a.sel ? "" : st.msg };
-    case "saved":
-      return { ...st, saved: true, base: a.base };
-    case "undone":
-      return { ...st, saved: false, base: null };
-    // הפנקס נמשך מהגיליון: השיעור שבזיכרון כבר לא יושב על אותו בסיס
-    case "rebased":
-      return { ...st, base: null, saved: false };
-    default:
-      return st;
-  }
-}
-
 export default function App() {
   const [cls, setCls] = useState(CLASSES[0]);
   /* הרשימה היא state ולא קבוע: היא נערכת בממשק ומסונכרנת עם הגיליון.
@@ -248,6 +199,22 @@ export default function App() {
   useEffect(() => {
     dispatch({ type: "cleared" });
   }, [teacherOn]);
+
+  /* האפליקציה נשארת פתוחה בטלפון בין שיעור לשיעור. loadAbsent כבר שומר
+     שהנוכחות לא תיגרר ליום אחר מהמטמון — אבל הסט שבזיכרון אינו נטען
+     מחדש, וכך השיעור הבא היה מתחיל עם הנעדרים של הקודם: מי שנעדר בשבוע
+     שעבר היה נרשם כמאחר היום, ומי שבאמת איחר לא היה נרשם כלל. */
+  useEffect(() => {
+    const onShow = () => {
+      if (document.visibilityState !== "visible") return;
+      // המטמון מסומן בתאריך, ולכן רשימה ריקה כשבזיכרון יש נעדרים = היום התחלף
+      if (!absent.size || loadAbsent(cls).length) return;
+      setAbsent(new Set());
+      dispatch({ type: "reset" });
+    };
+    document.addEventListener("visibilitychange", onShow);
+    return () => document.removeEventListener("visibilitychange", onShow);
+  }, [cls, absent]);
 
   /* מישהו הגיע באיחור או יצא באמצע. אין סיבה לפרק הרכבים שכבר מנגנים —
      מכניסים או מוציאים אותו מהחלוקה הקיימת, ומדווחים מה קרה. */
@@ -423,8 +390,9 @@ export default function App() {
       type: "drew",
       res: r,
       // תמונת הנוכחות נלקחת בחלוקה הראשונה בלבד; ה-reducer שומר עליה
-      // בחלוקה חוזרת, אחרת רישום האיחורים היה נמחק
+      // בחלוקה חוזרת של אותו יום, אבל לא גורר אותה לשיעור הבא
       atDraw: r ? new Set(absent) : null,
+      day: todayStamp(),
       err: r
         ? ""
         : `אי אפשר להרכיב ${k} הרכבים מ-${pool.length} הנוכחים — בכל הרכב חייבים תופים, בס, כלי הרמוני וכלי מלודי. נסה פחות הרכבים, או בדוק את הנוכחות.`,
