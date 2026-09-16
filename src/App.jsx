@@ -39,6 +39,7 @@ import {
   decodeLedger,
   ledgerToRows,
   rowsToLedger,
+  syncDirection,
 } from "./ensembles.js";
 
 /* מטמון מקומי. מקור האמת הוא הגיליון, וזה מה שמאפשר לעבוד גם בלי רשת */
@@ -114,6 +115,18 @@ function loadAtt(cls) {
 }
 const saveAtt = (cls, log) => store.set(ATT_KEY(cls), JSON.stringify(log));
 
+/* שינוי מקומי שעדיין לא הגיע לגיליון.
+   הטוקן של גוגל חי כשעה. שיעור שני באותו יום כבר נופל מחוץ לו, ואז כל
+   מסלולי השמירה מדלגים על הגיליון ושומרים במכשיר בלבד. הסימון הזה הוא
+   מה שמאפשר לסנכרון הבא להעלות את מה שנשאר מאחור במקום לדרוס אותו,
+   והוא נשמר במטמון כדי לשרוד גם רענון של הדף. */
+const PENDING_KEY = (cls) => `ens-pending-${TABS[cls]}`;
+const loadPending = (cls) => {
+  const r = store.get(PENDING_KEY(cls));
+  return !!r && r.value === "1";
+};
+const savePending = (cls, on) => store.set(PENDING_KEY(cls), on ? "1" : "0");
+
 /* ============================ תצוגה ============================ */
 
 export default function App() {
@@ -151,10 +164,18 @@ export default function App() {
   const [note, setNote] = useState("");
   // מצב הסנכרון: מחובר, הודעה אחרונה, ועסוק — שלושתם משתנים יחד
   const [sync, setSync] = useState({ on: Sheets.connected(), msg: "", busy: false });
+  // שינוי מקומי שממתין לגיליון. מוצג בממשק — אחרת הוא עוד שקט
+  const [pending, setPending] = useState(() => loadPending(CLASSES[0]));
   const { on: gOn, msg: gMsg, busy: gBusy } = sync;
   const setGMsg = (msg) => setSync((v) => ({ ...v, msg }));
   const setGBusy = (busy) => setSync((v) => ({ ...v, busy }));
   const setGOn = (on) => setSync((v) => ({ ...v, on }));
+  /* כל מסלול שמירה עובר דרך כאן: או שהנתון הגיע לגיליון, או שהוא מסומן
+     כממתין. בלי הסימון שמירה שלא נכתבה נראית בדיוק כמו שמירה שנכתבה. */
+  const markPending = (on) => {
+    savePending(cls, on);
+    setPending(on);
+  };
 
 
   /* כשנבחר נגן, מסמנים מראש עם מי מותר להחליף אותו. עדיף להראות את זה
@@ -194,6 +215,7 @@ export default function App() {
     setAbsent(new Set(loadAbsent(cls)));
     dispatch({ type: "reset" });
     setLedger(loadLedger(cls));
+    setPending(loadPending(cls));
   }, [cls]);
 
   useEffect(() => {
@@ -289,9 +311,19 @@ export default function App() {
     dispatch({ type: "cleared" });
   };
 
-  // משיכה מהגיליון: מקור האמת. localStorage נשאר כמטמון לשיעור בלי רשת.
   /**
-   * משיכה מהגיליון עבור כיתה אחת.
+   * סנכרון כיתה אחת מול הגיליון — בשני הכיוונים.
+   *
+   * הגיליון הוא מקור האמת, אבל לא תמיד הוא המעודכן: השיעור נרשם במכשיר,
+   * בכיתה, ורק אחר כך נכתב לגיליון. כשהכתיבה לא יצאה לדרך — הטוקן של
+   * גוגל חי כשעה, ושיעור שני באותו יום כבר נופל מחוץ לו — המכשיר מחזיק
+   * שיעור שהגיליון לא מכיר. משיכה עיוורת מוחקת אותו בלי שאיש ישים לב.
+   * לכן `syncDirection` מכריע קודם מי מעודכן, ורק אחר כך נוגעים בנתונים.
+   *
+   * ההכרעה נעשית **לפני** קריאת לשונית התלמידים, כי גם הרשימה נדרסת
+   * במשיכה: שם שתוקן במכשיר ולא הספיק להיכתב היה חוזר לקדמותו.
+   * מספר השיעורים יושב בתא הראשון ואינו תלוי ברשימה, ולכן אפשר להכריע
+   * לפיו בלי לקרוא אותה.
    *
    * `alive` אומר אם התוצאה עדיין רלוונטית: הסנכרון אסינכרוני, והמורה
    * יכול להחליף כיתה באמצע. בלי הבדיקה הזאת תשובה שמגיעה באיחור הייתה
@@ -302,14 +334,38 @@ export default function App() {
       if (!Sheets.connected()) return;
       setGBusy(true);
       try {
-        /* הרשימה והפנקס נטענים מהמטמון **לפי הכיתה שמסנכרנים**, ולא מ-ref.
-           ref מתעדכן ב-effect שרץ רק ברנדר הבא, ולכן ברגע החלפת כיתה הוא
+        /* הכול נטען מהמטמון **לפי הכיתה שמסנכרנים**, ולא מ-ref. ref
+           מתעדכן ב-effect שרץ רק ברנדר הבא, ולכן ברגע החלפת כיתה הוא
            עדיין החזיק את הכיתה הקודמת — וכך רשימת י״א נכתבה ללשונית
-           "תלמידים ט׳". loadRosterList תלויה ב-cls בלבד ואינה יכולה לפגר.
+           "תלמידים ט׳". הפונקציות האלה תלויות ב-cls בלבד ואינן יכולות לפגר. */
+        const localList = loadRosterList(cls);
+        const localLedger = loadLedger(cls);
+        const waiting = loadPending(cls);
 
-           הרשימה נקראת ראשונה: הפנקס והנוכחות מפוענחים מולה, ואם נקרא
-           אותם מול רשימה ישנה תלמיד חדש ייראה כאילו אינו קיים. */
-        let list = loadRosterList(cls);
+        const rows = await Sheets.readRows(TABS[cls]);
+        if (!alive()) return;
+        const sheetLessons = Number((rows[0] || [])[1]) || 0;
+
+        if (syncDirection(localLedger, { lessons: sheetLessons }, waiting) === "push") {
+          /* המכשיר מעודכן: מעלים את שלושת הנתונים יחד. הרשימה בכללם,
+             כי שם שתוקן במכשיר בזמן שלא היה חיבור נשאר רק שם. */
+          await Sheets.writeRows(ROSTER_TAB(cls), rosterToRows(localList), 5);
+          if (!alive()) return;
+          await Sheets.writeRows(TABS[cls], ledgerToRows(buildRoster(localList), localLedger));
+          if (!alive()) return;
+          await Sheets.writeRows(ATT_TAB(cls), attToRows(loadAtt(cls)), 5);
+          if (!alive()) return;
+          savePending(cls, false);
+          setPending(false);
+          setGMsg(
+            `מה שנשמר במכשיר הועלה לגיליון · ${localLedger.lessons} שיעורים`
+          );
+          return;
+        }
+
+        /* הגיליון מעודכן. הרשימה נקראת ראשונה: הפנקס והנוכחות מפוענחים
+           מולה, ואם נקרא אותם מול רשימה ישנה תלמיד חדש ייראה כאילו אינו קיים. */
+        let list = localList;
         try {
           const rrows = await Sheets.readRows(ROSTER_TAB(cls), 5);
           if (!alive()) return;
@@ -328,15 +384,6 @@ export default function App() {
              עם רשימה מהמטמון מאשר אפליקציה שלא עולה. */
         }
         const localRoster = buildRoster(list);
-        const rows = await Sheets.readRows(TABS[cls]);
-        if (!alive()) return;
-        const local = loadLedger(cls);
-        // לשונית ריקה בגיליון ופנקס מקומי קיים — מעלים את המקומי במקום למחוק אותו
-        if (!rows.length && local.lessons > 0) {
-          await Sheets.writeRows(TABS[cls], ledgerToRows(localRoster, local));
-          setGMsg(`הפנקס המקומי הועלה לגיליון · ${local.lessons} שיעורים`);
-          return;
-        }
         const next = rowsToLedger(localRoster, rows);
         setLedger(next);
         dispatch({ type: "rebased" });
@@ -369,6 +416,29 @@ export default function App() {
       on = false;
     };
   }, [cls, gOn, pull]);
+
+  /* הטוקן של גוגל חי כשעה ופג בשקט. עד כאן הכפתור המשיך להאיר "● גיליון"
+     בזמן שכל שמירה כבר נשמרה במכשיר בלבד — המורה ראה "נשמר" והשיעור לא
+     היה בגיליון. בדיקה תקופתית, ועוד אחת בכל חזרה למסך, כי בטלפון
+     האפליקציה מושהית בין שיעור לשיעור וטיימר לבדו לא בהכרח רץ. */
+  useEffect(() => {
+    const check = () =>
+      setSync((v) => {
+        const live = Sheets.connected();
+        if (v.on === live) return v;
+        return {
+          ...v,
+          on: live,
+          msg: live ? v.msg : "החיבור לגיליון פג — התחבר שוב כדי שהשמירה תגיע לגיליון",
+        };
+      });
+    const t = setInterval(check, 20000);
+    document.addEventListener("visibilitychange", check);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener("visibilitychange", check);
+    };
+  }, []);
 
   const connect = async () => {
     setGMsg("");
@@ -431,15 +501,24 @@ export default function App() {
       try {
         await Sheets.writeRows(TABS[cls], ledgerToRows(roster, next));
         await Sheets.writeRows(ATT_TAB(cls), attToRows(log), 5);
+        markPending(false);
         setGMsg(`נשמר בגיליון · ${next.lessons} שיעורים${summary ? " · " + summary : ""}`);
       } catch (e) {
+        markPending(true);
         setGOn(Sheets.connected());
         setGMsg("נשמר במכשיר אבל לא בגיליון — " + e.message);
       } finally {
         setGBusy(false);
       }
-    } else if (summary) {
-      setGMsg(`נרשם במכשיר · ${summary}`);
+    } else {
+      /* בלי חיבור השיעור נשמר במכשיר בלבד. קודם הודעה כזאת הופיעה רק אם
+         היו חיסורים, ובלעדיהם השמירה נראתה מוצלחת לגמרי — וכך שיעור שלם
+         לא הגיע לגיליון בלי שום סימן. */
+      markPending(true);
+      setGOn(false);
+      setGMsg(
+        `נשמר במכשיר בלבד — אין חיבור לגיליון${summary ? " · " + summary : ""}. התחבר ל״גיליון״ והשיעור יעלה.`
+      );
     }
   };
 
@@ -456,12 +535,18 @@ export default function App() {
       try {
         await Sheets.writeRows(TABS[cls], ledgerToRows(roster, back));
         await Sheets.writeRows(ATT_TAB(cls), attToRows(log), 5);
+        markPending(false);
         setGMsg(`השמירה בוטלה · ${back.lessons} שיעורים`);
       } catch (e) {
+        markPending(true);
         setGMsg("בוטל במכשיר אבל לא בגיליון — " + e.message);
       }
     } else {
-      setGMsg(`השמירה בוטלה · ${back.lessons} שיעורים`);
+      /* הביטול אינו משנה את מונה השיעורים, ולכן רק הסימון הזה יגרום
+         לסנכרון הבא להעלות אותו במקום למשוך את המצב שלפניו. */
+      markPending(true);
+      setGOn(false);
+      setGMsg(`השמירה בוטלה במכשיר בלבד — אין חיבור לגיליון · ${back.lessons} שיעורים`);
     }
   };
 
@@ -473,12 +558,20 @@ export default function App() {
     saveRosterList(cls, list);
     setPanelOpen(null);
     dispatch({ type: "cleared" });
-    if (!Sheets.connected()) return setGMsg(`הרשימה נשמרה במכשיר · ${list.length} תלמידים`);
+    if (!Sheets.connected()) {
+      markPending(true);
+      setGOn(false);
+      return setGMsg(
+        `הרשימה נשמרה במכשיר בלבד — אין חיבור לגיליון. התחבר ל״גיליון״ והיא תעלה.`
+      );
+    }
     setGBusy(true);
     try {
       await Sheets.writeRows(ROSTER_TAB(cls), rosterToRows(list), 5);
+      markPending(false);
       setGMsg(`הרשימה נשמרה בגיליון · ${list.length} תלמידים`);
     } catch (e) {
+      markPending(true);
       setGOn(Sheets.connected());
       setGMsg("הרשימה נשמרה במכשיר אבל לא בגיליון — " + e.message);
     } finally {
@@ -496,10 +589,16 @@ export default function App() {
       try {
         await Sheets.writeRows(TABS[cls], ledgerToRows(roster, EMPTY));
         await Sheets.writeRows(ATT_TAB(cls), attToRows([]), 5);
+        markPending(false);
         setGMsg("הפנקס ויומן הנוכחות אופסו גם בגיליון");
       } catch (e) {
+        markPending(true);
         setGMsg(e.message);
       }
+    } else {
+      markPending(true);
+      setGOn(false);
+      setGMsg("הפנקס אופס במכשיר בלבד — אין חיבור לגיליון");
     }
   };
 
@@ -576,14 +675,22 @@ export default function App() {
             onClick={gOn ? () => pull(false) : connect}
             disabled={gBusy}
             style={{
-              ...btn("transparent", gOn ? C.teal : C.dim),
-              border: `1px solid ${gOn ? C.teal + "88" : C.line}`,
+              ...btn("transparent", pending ? C.brass : gOn ? C.teal : C.dim),
+              border: `1px solid ${pending ? C.brass : gOn ? C.teal + "88" : C.line}`,
               padding: "8px 12px",
               fontSize: 14,
             }}
-            title={gOn ? "מסונכרן עם הגיליון. לחיצה מרעננת" : "בלי חיבור, הפנקס נשמר רק במכשיר הזה"}
+            title={
+              pending
+                ? "יש שינוי שנשמר במכשיר בלבד. לחיצה מעלה אותו לגיליון"
+                : gOn
+                  ? "מסונכרן עם הגיליון. לחיצה מרעננת"
+                  : "בלי חיבור, הפנקס נשמר רק במכשיר הזה"
+            }
           >
-            {gBusy ? "מסנכרן…" : gOn ? "● גיליון" : "○ גיליון"}
+            {/* שלושה מצבים ולא שניים: מחובר, מנותק, ומחובר־אבל־יש־מה־להעלות.
+                בלי המצב השלישי שיעור שנשמר במכשיר בלבד נראה כמו שיעור שנשמר. */}
+            {gBusy ? "מסנכרן…" : pending ? "⚠ ממתין לגיליון" : gOn ? "● גיליון" : "○ גיליון"}
           </button>
           <button
             onClick={() => toggle("track")}

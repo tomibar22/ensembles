@@ -26,6 +26,7 @@ import {
   mergeAttendance,
   attToRows,
   rowsToAtt,
+  syncDirection,
   attendanceSummary,
   buildRoster,
   forRole,
@@ -1329,6 +1330,38 @@ test("שם שהשתנה בגיליון לא מאבד היסטוריה — המז
 
 test("לשונית ריקה מחזירה פנקס ריק", () => {
   assert.deepEqual(rowsToLedger(ROSTERS["ט׳"], []), EMPTY);
+});
+
+/* ============ כיוון הסנכרון: מי מעודכן, המכשיר או הגיליון ============ */
+
+test("גיליון מעודכן מהמכשיר — מושכים", () => {
+  assert.equal(syncDirection({ lessons: 3 }, { lessons: 5 }), "pull");
+  assert.equal(syncDirection({ lessons: 0 }, { lessons: 1 }), "pull");
+  assert.equal(syncDirection({ lessons: 4 }, { lessons: 4 }), "pull");
+});
+
+test("שיעור שנשמר במכשיר בלבד לא נדרס במשיכה (רגרסיה)", () => {
+  /* הבאג: הטוקן של גוגל חי כשעה, והשיעור השני של אותו יום נשמר במכשיר
+     בלבד בלי שום סימן בממשק. הסנכרון הבא משך את הגיליון הישן ומחק אותו.
+     המכשיר הוא המקום שבו שיעור נרשם, ולכן כשיש בו יותר שיעורים — הוא
+     זה שמעודכן. */
+  assert.equal(syncDirection({ lessons: 6 }, { lessons: 5 }), "push");
+  // גם כשהגיליון ריק לגמרי, ולא רק כשהוא מפגר בשיעור אחד
+  assert.equal(syncDirection({ lessons: 2 }, { lessons: 0 }), "push");
+});
+
+test("שינוי שלא נוגע במונה השיעורים נשמר בזכות הסימון", () => {
+  /* תיקון שם ברשימה וביטול שמירה אינם משנים את מספר השיעורים, ולכן
+     ההשוואה לבדה לא הייתה מצילה אותם — הסימון הוא שמציל. */
+  assert.equal(syncDirection({ lessons: 4 }, { lessons: 4 }, true), "push");
+  assert.equal(syncDirection({ lessons: 0 }, { lessons: 0 }, true), "push");
+  // ובלי הסימון אותו מצב בדיוק נמשך מהגיליון
+  assert.equal(syncDirection({ lessons: 4 }, { lessons: 4 }, false), "pull");
+});
+
+test("פנקס ריק משני הצדדים אינו מייצר העלאה מיותרת", () => {
+  assert.equal(syncDirection({}, {}), "pull");
+  assert.equal(syncDirection({ lessons: 0 }, { lessons: 0 }), "pull");
 });
 
 /* ==================== הרשימה כנתון (גיליון ועריכה) ==================== */
