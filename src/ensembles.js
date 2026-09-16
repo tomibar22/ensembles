@@ -798,6 +798,25 @@ function attToRows(log) {
   ];
 }
 
+/**
+ * מרענן את שמות התצוגה ביומן לפי הרשימה הנוכחית.
+ *
+ * השם הוא השתקפות של הרשימה ולא נתון עצמאי, אבל הוא משוכפל גם ללשונית
+ * הפנקס וגם ליומן הנוכחות — שתיהן מזוהות לפי מזהה, והשם בהן הוא עותק
+ * שנכתב ברגע השמירה. בלי רענון, תיקון שם נשאר רק בלשונית התלמידים:
+ * כך "סמואל" נשאר ב-g9 ובשורות היומן אחרי שהשם כבר תוקן ל"אוריה",
+ * והמורה רואה בגיליון שם שהוא כבר שינה.
+ *
+ * מי שהוסר מהרשימה שומר על השם שנרשם לו — אין לנו טוב ממנו, ומחיקתו
+ * הייתה הופכת שורת חיסור ישנה לשורה בלי שם.
+ */
+function renameInAtt(log, roster) {
+  const byId = Object.fromEntries(roster.map((s) => [s.id, s.name]));
+  return (log || []).map((e) =>
+    byId[e.id] && byId[e.id] !== e.name ? { ...e, name: byId[e.id] } : e
+  );
+}
+
 function rowsToAtt(rows) {
   const byLabel = Object.fromEntries(Object.entries(ATT_LABEL).map(([k, v]) => [v, k]));
   return (rows || [])
@@ -1160,6 +1179,7 @@ export {
   mergeAttendance,
   attToRows,
   rowsToAtt,
+  renameInAtt,
   syncDirection,
   attendanceSummary,
   NO_LESSON,

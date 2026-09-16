@@ -39,6 +39,7 @@ import {
   decodeLedger,
   ledgerToRows,
   rowsToLedger,
+  renameInAtt,
   syncDirection,
 } from "./ensembles.js";
 
@@ -558,6 +559,24 @@ export default function App() {
     saveRosterList(cls, list);
     setPanelOpen(null);
     dispatch({ type: "cleared" });
+
+    /* שם תצוגה מופיע בשלוש לשוניות: התלמידים, הפנקס ויומן הנוכחות.
+       רק הראשונה היא מקור האמת — בשתיים האחרות זה עותק שנכתב ברגע
+       השמירה, לצד המזהה. בלי הרענון כאן, תיקון שם היה נשאר בלשונית
+       התלמידים בלבד: "סמואל" נשאר ב-g9 אחרי שכבר תוקן ל"אוריה",
+       והמורה רואה בגיליון שם שהוא בעצמו שינה.
+       הרשימה כבר עברה את rosterProblems בעורך, אבל buildRoster זורק
+       על מזהה כפול — ונפילה כאן לא צריכה למנוע את שמירת הרשימה עצמה. */
+    let renamed = null;
+    try {
+      const next = buildRoster(list);
+      renamed = { roster: next, log: renameInAtt(attLog, next) };
+      setAttLog(renamed.log);
+      saveAtt(cls, renamed.log);
+    } catch {
+      // נשמור את הרשימה בלי הרענון, ולא נאבד את שתיהן
+    }
+
     if (!Sheets.connected()) {
       markPending(true);
       setGOn(false);
@@ -568,6 +587,10 @@ export default function App() {
     setGBusy(true);
     try {
       await Sheets.writeRows(ROSTER_TAB(cls), rosterToRows(list), 5);
+      if (renamed) {
+        await Sheets.writeRows(TABS[cls], ledgerToRows(renamed.roster, ledger));
+        await Sheets.writeRows(ATT_TAB(cls), attToRows(renamed.log), 5);
+      }
       markPending(false);
       setGMsg(`הרשימה נשמרה בגיליון · ${list.length} תלמידים`);
     } catch (e) {

@@ -152,6 +152,28 @@ if (hasEditor) {
   check(names.includes("אוריה-בדיקה"), `גם תיקון השם עלה לגיליון (${names.slice(0, 3).join(", ")}…)`);
 }
 
+/* ותיקון שם **בזמן שהחיבור חי**: הוא חייב להגיע גם ללשונית הפנקס ולא רק
+   לרשימה. השם שם הוא עותק לצד המזהה, וקודם הוא התרענן רק בשמירת שיעור —
+   וכך "סמואל" נשאר ב-g9 אחרי שהשם כבר תוקן ברשימה. */
+await p.getByRole("button", { name: "רשימת הכיתה" }).click();
+await p.waitForTimeout(600);
+const live = p.locator('input[aria-label="שם פרטי"][value="אוריה-בדיקה"]').first();
+if (await live.count()) {
+  await live.fill("אוריה-חי");
+  await p.getByRole("button", { name: /שמור את הרשימה/ }).click();
+  await p.waitForTimeout(1200);
+  const after = await sheet();
+  const inRoster = (after["תלמידים ט׳"] || []).slice(1).map((r) => r[0]);
+  const inLedger = (after["g9"] || []).slice(2).map((r) => r[0]);
+  check(inRoster.includes("אוריה-חי"), "השם המתוקן נכתב ללשונית התלמידים");
+  check(
+    inLedger.includes("אוריה-חי") && !inLedger.includes("אוריה-בדיקה"),
+    `השם המתוקן רוענן גם בלשונית הפנקס g9 (${inLedger.slice(0, 4).join(", ")}…)`
+  );
+} else {
+  console.log("(שדה השם לא נמצא — מדלג על בדיקת רענון g9)");
+}
+
 const btnEnd = (await p.getByRole("button", { name: /גיליון|ממתין/ }).first().textContent()) || "";
 check(!/ממתין/.test(btnEnd), `אחרי ההעלאה הסימון נעלם (בכפתור: "${btnEnd.trim()}")`);
 

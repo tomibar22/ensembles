@@ -26,6 +26,7 @@ import {
   mergeAttendance,
   attToRows,
   rowsToAtt,
+  renameInAtt,
   syncDirection,
   attendanceSummary,
   buildRoster,
@@ -1330,6 +1331,52 @@ test("שם שהשתנה בגיליון לא מאבד היסטוריה — המז
 
 test("לשונית ריקה מחזירה פנקס ריק", () => {
   assert.deepEqual(rowsToLedger(ROSTERS["ט׳"], []), EMPTY);
+});
+
+/* ============ שם שתוקן: השתקפות הרשימה, לא עותק קפוא ============ */
+
+test("תיקון שם מתעדכן ביומן לפי המזהה (רגרסיה)", () => {
+  /* השם משוכפל ללשונית הפנקס וליומן הנוכחות. בלי הרענון "סמואל" נשאר
+     שם אחרי שכבר תוקן ל"אוריה" — וזה בדיוק מה שקרה בגיליון g9. */
+  const roster = buildRoster([
+    ["אוריה", "כהן אוריה", ["חצוצרה"], "סמואל-כהן אוריה"],
+    ["ניב", "כנען", ["בס"], "ניב-כנען"],
+  ]);
+  const log = [
+    { date: "2026-09-01", lesson: 1, name: "סמואל", id: "סמואל-כהן אוריה", status: "absent" },
+    { date: "2026-09-08", lesson: 2, name: "ניב", id: "ניב-כנען", status: "late" },
+  ];
+  const out = renameInAtt(log, roster);
+  assert.equal(out[0].name, "אוריה", "השם הישן נשאר ביומן");
+  assert.equal(out[0].id, "סמואל-כהן אוריה", "המזהה לא נגע");
+  assert.equal(out[0].status, "absent");
+  assert.equal(out[0].lesson, 1);
+  assert.equal(out[1].name, "ניב", "מי שלא השתנה נשאר כמו שהיה");
+});
+
+test("מי שהוסר מהרשימה שומר על השם שנרשם לו", () => {
+  /* מחיקת השם הייתה הופכת שורת חיסור ישנה לשורה בלי שם, ואין לנו
+     מקור טוב יותר לשמו של מי שכבר אינו ברשימה. */
+  const roster = buildRoster([["ניב", "כנען", ["בס"], "ניב-כנען"]]);
+  const log = [{ date: "2026-09-01", lesson: 1, name: "עזב", id: "עזב-הכיתה", status: "absent" }];
+  assert.equal(renameInAtt(log, roster)[0].name, "עזב");
+});
+
+test("יומן ריק או חסר אינו מפיל את הרענון", () => {
+  const roster = buildRoster([["ניב", "כנען", ["בס"], "ניב-כנען"]]);
+  assert.deepEqual(renameInAtt([], roster), []);
+  assert.deepEqual(renameInAtt(undefined, roster), []);
+});
+
+test("לשונית הפנקס נכתבת עם השם המתוקן", () => {
+  /* ledgerToRows לוקח את השם מהרשימה שמועברת לו, ולכן רשימה מתוקנת
+     מספיקה — כל עוד מישהו באמת כותב את הלשונית מחדש אחרי תיקון שם. */
+  const roster = buildRoster([["אוריה", "כהן אוריה", ["חצוצרה"], "סמואל-כהן אוריה"]]);
+  const rows = ledgerToRows(roster, { plays: { "סמואל-כהן אוריה": 3 }, pairs: {}, lessons: 2 });
+  const row = rows.slice(2).find((r) => r[2] === "סמואל-כהן אוריה");
+  assert.ok(row, "השורה של התלמיד לא נמצאה לפי המזהה");
+  assert.equal(row[0], "אוריה", "בלשונית הפנקס נכתב השם הישן");
+  assert.equal(row[1], 3, "מספר ההרכבים השתנה");
 });
 
 /* ============ כיוון הסנכרון: מי מעודכן, המכשיר או הגיליון ============ */
