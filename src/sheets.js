@@ -5,7 +5,17 @@ export const CLIENT_ID =
   "521413250620-09c34bu4o2nhne004nkgcrvn1kkoh9bc.apps.googleusercontent.com";
 export const SPREADSHEET_ID = "1lDLqOU4yvWGPg23pk6QJuKaQdOG1EvMflqwr1QqrWyY";
 
-const SCOPE = "https://www.googleapis.com/auth/spreadsheets";
+/* מסמכי תיעוד השיעורים, לכל כיתה. מתחלפים בכל שנת לימודים. */
+export const LESSON_DOCS = {
+  "ט׳": "11lRWcR9tYJFPQ5Hq3bObEjpk3eO0ND3qps4VdDwBLpE",
+  "י״א": "1PjRn9w53ZTwVmXtwIZO9C_TbT2_THYENYb345-tFy3I",
+};
+
+// קריאה בלבד במסמכים — האפליקציה לא כותבת לתיעוד
+const SCOPE = [
+  "https://www.googleapis.com/auth/spreadsheets",
+  "https://www.googleapis.com/auth/documents.readonly",
+].join(" ");
 const API = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}`;
 
 let token = null;
@@ -104,4 +114,23 @@ export async function writeRows(tab, rows, cols = 4) {
       ],
     }),
   });
+}
+
+/**
+ * קורא מסמך Google Docs ומחזיר את ה-JSON של Docs API.
+ *
+ * בכוונה לא דרך `api`: כשל כאן לא אומר שההרשאה לגיליון פגה, ולכן אסור
+ * לו לאפס את הטוקן ולנתק את הסנכרון. 403 כאן הוא כמעט תמיד Docs API
+ * שלא הופעל בפרויקט, או טוקן ישן שניתן לפני שנוספה ההרשאה למסמכים.
+ */
+export async function readDoc(id) {
+  const res = await fetch(`https://docs.googleapis.com/v1/documents/${id}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    if (res.status === 403) throw new Error("אין הרשאה לקרוא את מסמך התיעוד — התחבר מחדש, או הפעל את Google Docs API בפרויקט");
+    if (res.status === 404) throw new Error("מסמך התיעוד לא נמצא");
+    throw new Error(`שגיאה בקריאת התיעוד ${res.status}`);
+  }
+  return res.json();
 }

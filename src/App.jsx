@@ -4,6 +4,7 @@ import RosterEditor from "./RosterEditor.jsx";
 import AttendanceBoard from "./AttendanceBoard.jsx";
 import TrackPanel from "./TrackPanel.jsx";
 import Groups from "./Groups.jsx";
+import LessonNote from "./LessonNote.jsx";
 import { C, btn, ghost } from "./theme.js";
 import {
   CLASSES,
@@ -41,6 +42,8 @@ import {
   rowsToLedger,
   renameInAtt,
   syncDirection,
+  docToLines,
+  lastLesson,
 } from "./ensembles.js";
 
 /* מטמון מקומי. מקור האמת הוא הגיליון, וזה מה שמאפשר לעבוד גם בלי רשת */
@@ -128,6 +131,19 @@ const loadPending = (cls) => {
 };
 const savePending = (cls, on) => store.set(PENDING_KEY(cls), on ? "1" : "0");
 
+/* סיכום השיעור הקודם, כפי שנקרא לאחרונה ממסמך התיעוד. נשמר כדי שיופיע
+   מיד בפתיחה — עוד לפני ההתחברות לגוגל, וגם בלי רשת. */
+const NOTE_KEY = (cls) => `ens-note-${TABS[cls]}`;
+function loadNote(cls) {
+  try {
+    const r = store.get(NOTE_KEY(cls));
+    const o = r ? JSON.parse(r.value) : null;
+    return o && typeof o.date === "string" && Array.isArray(o.items) ? o : null;
+  } catch {
+    return null;
+  }
+}
+
 /* ============================ תצוגה ============================ */
 
 export default function App() {
@@ -167,6 +183,8 @@ export default function App() {
   const [sync, setSync] = useState({ on: Sheets.connected(), msg: "", busy: false });
   // שינוי מקומי שממתין לגיליון. מוצג בממשק — אחרת הוא עוד שקט
   const [pending, setPending] = useState(() => loadPending(CLASSES[0]));
+  // השיעור הקודם מתוך מסמך התיעוד. fresh = נקרא מהמסמך בביקור הזה
+  const [lastNote, setLastNote] = useState(() => ({ last: loadNote(CLASSES[0]), err: "", fresh: false }));
   const { on: gOn, msg: gMsg, busy: gBusy } = sync;
   const setGMsg = (msg) => setSync((v) => ({ ...v, msg }));
   const setGBusy = (busy) => setSync((v) => ({ ...v, busy }));
@@ -418,6 +436,33 @@ export default function App() {
     };
   }, [cls, gOn, pull]);
 
+  /* סיכום השיעור הקודם. נקרא מחדש בכל כניסה ובכל חזרה למסך: בטלפון
+     האפליקציה נשארת פתוחה מהשיעור הקודם, והתיעוד נכתב בינתיים. */
+  useEffect(() => {
+    setLastNote({ last: loadNote(cls), err: "", fresh: false });
+    if (!gOn) return;
+    const id = Sheets.LESSON_DOCS[cls];
+    if (!id) return;
+    let on = true;
+    const read = async () => {
+      if (document.visibilityState === "hidden" || !Sheets.connected()) return;
+      try {
+        const last = lastLesson(docToLines(await Sheets.readDoc(id)));
+        if (!on) return;
+        if (last) store.set(NOTE_KEY(cls), JSON.stringify(last));
+        setLastNote({ last, err: last ? "" : "לא מצאתי במסמך התיעוד שורת תאריך", fresh: true });
+      } catch (e) {
+        if (on) setLastNote((v) => ({ ...v, err: e.message }));
+      }
+    };
+    read();
+    document.addEventListener("visibilitychange", read);
+    return () => {
+      on = false;
+      document.removeEventListener("visibilitychange", read);
+    };
+  }, [cls, gOn]);
+
   /* הטוקן של גוגל חי כשעה ופג בשקט. עד כאן הכפתור המשיך להאיר "● גיליון"
      בזמן שכל שמירה כבר נשמרה במכשיר בלבד — המורה ראה "נשמר" והשיעור לא
      היה בגיליון. בדיקה תקופתית, ועוד אחת בכל חזרה למסך, כי בטלפון
@@ -660,6 +705,8 @@ export default function App() {
           ))}
         </div>
       </header>
+
+      <LessonNote key={cls} last={lastNote.last} err={lastNote.err} stale={!lastNote.fresh && !lastNote.err} folded={!!res} />
 
       <div style={{ maxWidth: 760, margin: "0 auto 12px", background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14, padding: "12px 14px" }}>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>

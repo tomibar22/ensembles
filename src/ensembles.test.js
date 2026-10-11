@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  docToLines,
+  lessonDate,
+  lastLesson,
   ROSTERS,
   CLASSES,
   TEACHER,
@@ -1668,4 +1671,40 @@ test("כלי שאינו מוכר מופיע בסוף ולא נעלם", () => {
 
 test("כיתה ריקה לא מפילה את הקיבוץ", () => {
   assert.deepEqual(byInstrument([]), []);
+});
+
+/* ============================ תיעוד השיעורים ============================ */
+
+const para = (text, nestingLevel) => ({
+  paragraph: {
+    elements: [{ textRun: { content: text + "\n" } }],
+    ...(nestingLevel === undefined ? {} : { bullet: { nestingLevel } }),
+  },
+});
+
+test("docToLines: תבליטים מסומנים, שורות ריקות נופלות", () => {
+  const doc = {
+    body: {
+      content: [{ sectionBreak: {} }, para("7.9.26"), para(""), para("חלוקה להרכבים", 0), para("פרט", 1)],
+    },
+  };
+  assert.deepEqual(docToLines(doc), ["7.9.26", "- חלוקה להרכבים", "  - פרט"]);
+  assert.deepEqual(docToLines({}), []);
+});
+
+test("lessonDate: תאריך בנוסח המסמך, ורק הוא", () => {
+  assert.ok(lessonDate("5.10.26") > lessonDate("14.9.26"));
+  assert.equal(lessonDate("5.10.2026"), lessonDate("5.10.26"));
+  assert.equal(lessonDate("- נגינה של 5.10.26"), null);
+  assert.equal(lessonDate("40.10.26"), null);
+});
+
+test("lastLesson: האחרון לפי תאריך, בלי תלות בסדר במסמך", () => {
+  const lines = ["7.9.26", "- היכרות", "5.10.26", "- חלוקה להרכבים", "- משחק אלתור", "14.9.26", "- beatrice"];
+  assert.deepEqual(lastLesson(lines), { date: "5.10.26", items: ["- חלוקה להרכבים", "- משחק אלתור"] });
+  // מסמך שבו החדש למעלה
+  assert.equal(lastLesson(["30.11.23", "- טריידים", "23.11.23", "- קורל"]).date, "30.11.23");
+  assert.equal(lastLesson(["כותרת בלי תאריך"]), null);
+  // שורת תאריך בלי תבליטים עדיין שיעור — ריק, ולא null
+  assert.deepEqual(lastLesson(["12.10.26"]), { date: "12.10.26", items: [] });
 });

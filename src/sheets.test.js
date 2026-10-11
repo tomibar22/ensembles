@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readRows, writeRows } from "./sheets.js";
+import { readRows, writeRows, readDoc } from "./sheets.js";
 
 /* fetch מזויף שמתעד את הקריאות, כדי לבדוק את צורת הבקשות בלי רשת */
 function stubFetch(handler) {
@@ -95,4 +95,14 @@ test("קריאה מחזירה שורות, ולשונית ריקה מחזירה �
   assert.deepEqual(await readRows("g9"), ROWS);
   stubFetch((url) => (url.includes("/values/") ? {} : META));
   assert.deepEqual(await readRows("g9"), []);
+});
+
+test("readDoc: קורא מ-Docs API, ו-403 מוסבר במקום להיבלע", async () => {
+  const calls = stubFetch(() => ({ body: { content: [] } }));
+  const doc = await readDoc("abc");
+  assert.equal(calls[0].url, "https://docs.googleapis.com/v1/documents/abc");
+  assert.deepEqual(doc, { body: { content: [] } });
+
+  globalThis.fetch = async () => ({ ok: false, status: 403, text: async () => "" });
+  await assert.rejects(readDoc("abc"), /Google Docs API/);
 });

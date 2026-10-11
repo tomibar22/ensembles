@@ -28,7 +28,7 @@ git checkout <branch>
 
 ## פקודות
 
-- `npm test` — 118 בדיקות על `node:test`, בלי תלויות. חייב להיות ירוק.
+- `npm test` — 122 בדיקות על `node:test`, בלי תלויות. חייב להיות ירוק.
   הפקודה היא `node --test` בלי תבנית glob: node 20 לא תומך בהן ו-CI נפל על זה.
 - `npm run lint` — errors בלבד חוסמים; warnings של הוקים מקובלים.
   שים לב: `no-use-before-define` תופס גם קבוע שמוגדר בהמשך הקובץ ומשמש
@@ -47,6 +47,13 @@ git checkout <branch>
   `src/RosterEditor.jsx` — רשימת הכיתה.
 - `src/theme.js` — הפלטה ועוזרי הסגנון. **אין להגדיר צבע בתוך רכיב.**
 - `src/sheets.js` — Google Sheets. `src/ErrorBoundary.jsx` — במקום מסך לבן.
+- `src/LessonNote.jsx` — "בשיעור הקודם": סיכום השיעור האחרון ממסמך התיעוד
+  של הכיתה ב-Google Docs (`LESSON_DOCS` ב-`sheets.js`, מתחלף כל שנה).
+  הפענוח (`docToLines`, `lastLesson`) ב-`ensembles.js`. המסמך נכתב ביד:
+  שורת תאריך `5.10.26` ותבליטים מתחתיה; "אחרון" לפי התאריך, לא לפי המיקום.
+  הקריאה דורשת שהרשאת `documents.readonly` ו-Google Docs API מופעלים
+  בפרויקט. `readDoc` לא עוברת דרך `api` בכוונה — כשל במסמך לא מנתק את
+  הגיליון.
 
 ## כללים שאסור לשבור
 
@@ -181,6 +188,8 @@ git checkout <branch>
   `scripts/sheet-sync.check.mjs` (גיליון מזויף, בלי תלות ב-`npm test`)
   ו-`scripts/sync-expiry.check.mjs` (טוקן שפג באמצע יום ההוראה).
   שניהם מקבלים `CHROMIUM_PATH` אם הדפדפן אינו במקום הרגיל.
+  הם חוסמים את `accounts.google.com`: בלי זה הספרייה האמיתית דורסת את
+  ה-`window.google` המזויף, שום דבר לא מתחבר, ו-11 בדיקות נכשלות בלי קשר לקוד.
 - **בדיקה שעוברת מול הקוד הישן חסרת ערך.** בכל תיקון באג — לוודא שהבדיקה
   החדשה נכשלת מול ההתנהגות הקודמת.
 - **אין לקבע מספר הרכבים בבדיקות.** לגזור אותו מ-`capacity(pool).rec` —

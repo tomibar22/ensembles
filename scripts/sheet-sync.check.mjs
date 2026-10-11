@@ -40,6 +40,10 @@ const b = await chromium.launch(EXE ? { executablePath: EXE } : {});
 const p = await b.newPage({ viewport: { width: 390, height: 900 } });
 await p.addInitScript(SHEET_INIT);
 
+/* הספרייה האמיתית של גוגל נטענת מ-index.html ודורסת את window.google
+   המזויף — ואז שום דבר לא מתחבר וכל הבדיקות נכשלות בלי קשר לקוד. */
+await p.route("https://accounts.google.com/**", (r) => r.fulfill({ status: 200, contentType: "text/javascript", body: "" }));
+
 await p.route("https://sheets.googleapis.com/**", async (route) => {
   const url = route.request().url();
   const method = route.request().method();
