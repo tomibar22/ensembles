@@ -18,6 +18,8 @@ import {
   addToDraw,
   NO_LESSON,
   lessonReducer,
+  packLesson,
+  unpackLesson,
   enrichHarmony,
   removeFromDraw,
   repairDraw,
@@ -1927,4 +1929,45 @@ test("פתיחת בורר ההוספה וסימון נגן לא פתוחים י�
   assert.equal(st.sel, null);
   st = lessonReducer(st, { type: "edit", res: live(), msg: "" });
   assert.equal(st.adding, null);
+});
+
+/* ======================= שיעור שורד רענון של הדף ======================= */
+
+test("השיעור של היום חוזר מהמכשיר כמו שהיה, כולל הפנקס שלפניו והאיחורים", () => {
+  const r = recDraw("ט׳");
+  const base = { plays: { a: 1 }, pairs: {}, lessons: 3 };
+  let st = lessonReducer(NO_LESSON, { type: "restore", cls: "ט׳" });
+  st = lessonReducer(st, { type: "drew", res: r, err: "", day: "2026-10-26", atDraw: new Set(["דני"]) });
+  st = lessonReducer(st, { type: "saved", base });
+  const text = packLesson(st, "2026-10-26", false);
+  const ids = [...ROSTERS["ט׳"].map((s) => s.id), TEACHER.id];
+  const back = unpackLesson(text, "2026-10-26", ids);
+  assert.ok(back, "שיעור תקין לא שוחזר");
+  assert.equal(back.teacher, false);
+  assert.deepEqual(back.lesson.res, r);
+  assert.deepEqual(back.lesson.base, base, "בלי הפנקס שלפני, שמירה אחרי רענון נספרת כשיעור נוסף");
+  assert.equal(back.lesson.saved, true);
+  assert.deepEqual([...back.lesson.atDraw], ["דני"]);
+});
+
+test("שיעור של יום אחר, פגום, או עם תלמיד שאינו ברשימה — לא משוחזר", () => {
+  const r = recDraw("ט׳");
+  const st = lessonReducer(NO_LESSON, { type: "drew", res: r, err: "", day: "d", atDraw: new Set() });
+  const text = packLesson(st, "2026-10-19", true);
+  const ids = [...ROSTERS["ט׳"].map((s) => s.id), TEACHER.id];
+  assert.equal(unpackLesson(text, "2026-10-26", ids), null, "חלוקה של שבוע שעבר חזרה");
+  assert.equal(unpackLesson("{לא json", "2026-10-19", ids), null);
+  assert.equal(unpackLesson("", "2026-10-19", ids), null);
+  assert.equal(unpackLesson(text, "2026-10-19", ids.slice(1)), null, "חזרה חלוקה עם תלמיד שנמחק");
+});
+
+test("הכיתה נשמרת במצב: איפוס לא מנתק אותו, וטעינת כיתה מחליפה אותו", () => {
+  let st = lessonReducer(NO_LESSON, { type: "restore", cls: "י״א" });
+  assert.equal(st.cls, "י״א");
+  st = lessonReducer(st, { type: "reset" });
+  assert.equal(st.cls, "י״א", "איפוס ניתק את המצב מהכיתה, והשמירה למכשיר נפסקת");
+  st = lessonReducer(st, { type: "restore", cls: "ט׳", lesson: { res: { groups: [], load: {}, bench: [] }, saved: true } });
+  assert.equal(st.cls, "ט׳");
+  assert.equal(st.saved, true);
+  assert.equal(st.sel, null);
 });

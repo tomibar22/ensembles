@@ -25,6 +25,8 @@ import {
   rowsToAtt,
   NO_LESSON,
   lessonReducer,
+  packLesson,
+  unpackLesson,
   attendanceSummary,
   addToDraw,
   removeFromDraw,
@@ -118,6 +120,17 @@ function loadAtt(cls) {
   }
 }
 const saveAtt = (cls, log) => store.set(ATT_KEY(cls), JSON.stringify(log));
+
+/* השיעור של היום, כדי שרענון או סגירה של הדף ברקע לא ימחקו חלוקה
+   ועריכות ידניות. נשמר ליום אחד, לפי הכיתה. */
+const LESSON_KEY = (cls) => `ens-lesson-${TABS[cls]}`;
+function loadLesson(cls, roster) {
+  const r = store.get(LESSON_KEY(cls));
+  return r && unpackLesson(r.value, todayStamp(), [...roster.map((s) => s.id), TEACHER.id]);
+}
+// חלוקה שירדה מהמסך נמחקת גם מהמכשיר ("" נקרא כאין-כלום)
+const saveLesson = (cls, st, teacher) =>
+  store.set(LESSON_KEY(cls), st.res ? packLesson(st, todayStamp(), teacher) : "");
 
 /* שינוי מקומי שעדיין לא הגיע לגיליון.
    הטוקן של גוגל חי כשעה. שיעור שני באותו יום כבר נופל מחוץ לו, ואז כל
@@ -245,17 +258,24 @@ export default function App() {
   useEffect(() => {
     setKPick(null);
     setAttLog(loadAtt(cls));
-    setRosterList(loadRosterList(cls));
+    const list = loadRosterList(cls);
+    setRosterList(list);
     setPanelOpen(null);
     setAbsent(new Set(loadAbsent(cls)));
-    dispatch({ type: "reset" });
+    /* השיעור של היום חוזר כמו שהיה — כולל מי שנשמר והפנקס שלפניו. הרשימה
+       נטענת כאן מ-cls ולא מ-state, שעדיין מחזיק את הכיתה הקודמת. */
+    const back = loadLesson(cls, buildRoster(list));
+    setTeacherOn(back ? back.teacher : true);
+    dispatch({ type: "restore", cls, lesson: back && back.lesson });
     setLedger(loadLedger(cls));
     setPending(loadPending(cls));
   }, [cls]);
 
+  /* נשמר רק מצב ששייך לכיתה הנוכחית: ברנדר של החלפת כיתה ה-reducer עוד
+     מחזיק את הקודמת, וכתיבה אז הייתה שמה אותה בלשונית של החדשה. */
   useEffect(() => {
-    dispatch({ type: "cleared" });
-  }, [teacherOn]);
+    if (lesson.cls === cls) saveLesson(cls, lesson, teacherOn);
+  }, [lesson, cls, teacherOn]);
 
   /* האפליקציה נשארת פתוחה בטלפון בין שיעור לשיעור. loadAbsent כבר שומר
      שהנוכחות לא תיגרר ליום אחר מהמטמון — אבל הסט שבזיכרון אינו נטען
@@ -745,7 +765,10 @@ export default function App() {
             </select>
           </label>
           <button
-            onClick={() => setTeacherOn(!teacherOn)}
+            onClick={() => {
+              setTeacherOn(!teacherOn);
+              dispatch({ type: "cleared" });
+            }}
             aria-pressed={teacherOn}
             style={{
               ...btn(teacherOn ? C.soft : "transparent", teacherOn ? C.ink : C.dim),

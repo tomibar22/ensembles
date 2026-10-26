@@ -1238,15 +1238,67 @@ const NO_LESSON = {
   err: "",
   msg: "",
   sel: null,
+  cls: null, // הכיתה שהמצב שייך לה — רק מצב של הכיתה הנוכחית נשמר במכשיר
   adding: null, // אינדקס ההרכב שפותחים בו את בורר ההוספה
   undo: null, // החלוקה שלפני העריכה הידנית האחרונה
 };
+
+/**
+ * השיעור של היום כטקסט, כדי שיעבור רענון של הדף. החלוקה חיה ב-reducer, כלומר
+ * בזיכרון — ובטלפון דף ברקע נסגר, או שהמורה מרענן לקבל גרסה חדשה, והחלוקה
+ * והעריכות הידניות היו אובדות. נשמר גם `base`: בלעדיו שמירה אחרי רענון הייתה
+ * נספרת כשיעור נוסף במקום לעדכן את זה שכבר נשמר, ו״בטל שמירה״ לא היה זמין.
+ */
+function packLesson(st, today, teacher) {
+  return JSON.stringify({
+    v: 1,
+    d: today,
+    teacher,
+    res: st.res,
+    saved: st.saved,
+    base: st.base,
+    atDraw: st.atDraw ? [...st.atDraw] : null,
+    day: st.day,
+    undo: st.undo,
+  });
+}
+
+/**
+ * מחזיר `{ lesson, teacher }`, או null כשאין מה לשחזר: טקסט פגום, שיעור של
+ * יום אחר (אסור שחלוקה של שבוע שעבר תחזור), או חלוקה שמזכירה תלמיד שכבר
+ * אינו ברשימה. עדיף חלוקה חדשה על חלוקה שאי אפשר לסמוך עליה.
+ */
+function unpackLesson(text, today, knownIds) {
+  try {
+    const o = JSON.parse(text);
+    if (!o || o.v !== 1 || o.d !== today || !o.res || !Array.isArray(o.res.groups)) return null;
+    const known = new Set(knownIds);
+    const seen = [...o.res.groups.flat(), ...(o.res.bench || [])];
+    if (seen.some((m) => !known.has(m.id))) return null;
+    return {
+      teacher: o.teacher !== false,
+      lesson: {
+        res: o.res,
+        saved: !!o.saved,
+        base: o.base || null,
+        atDraw: Array.isArray(o.atDraw) ? new Set(o.atDraw) : null,
+        day: o.day ?? null,
+        undo: o.undo || null,
+      },
+    };
+  } catch {
+    return null;
+  }
+}
 
 function lessonReducer(st, a) {
   switch (a.type) {
     // כיתה אחרת, רשימה שנערכה, או פנקס שנטען — הכול מתחיל מחדש
     case "reset":
-      return NO_LESSON;
+      return { ...NO_LESSON, cls: st.cls };
+    // טעינת הכיתה: השיעור של היום כפי שנשמר במכשיר, או שיעור ריק
+    case "restore":
+      return { ...NO_LESSON, ...(a.lesson || {}), cls: a.cls };
     // החלוקה יורדת מהמסך, אבל השיעור עצמו נמשך (הפנקס שלפניו נשמר)
     case "cleared":
       return { ...st, res: null, saved: false, err: "", msg: "", sel: null, adding: null, undo: null };
@@ -1413,6 +1465,8 @@ export {
   attendanceSummary,
   NO_LESSON,
   lessonReducer,
+  packLesson,
+  unpackLesson,
   applyLesson,
   addToDraw,
   enrichHarmony,
