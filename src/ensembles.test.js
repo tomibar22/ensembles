@@ -22,6 +22,11 @@ import {
   removeFromDraw,
   repairDraw,
   swapPlayers,
+  movePlayer,
+  addPlayer,
+  removePlayer,
+  changeInstrument,
+  BENCH,
   ATT_TAB,
   FORMER_NAMES,
   attendanceOf,
@@ -1707,4 +1712,219 @@ test("lastLesson: האחרון לפי תאריך, בלי תלות בסדר במ�
   assert.equal(lastLesson(["כותרת בלי תאריך"]), null);
   // שורת תאריך בלי תבליטים עדיין שיעור — ריק, ולא null
   assert.deepEqual(lastLesson(["12.10.26"]), { date: "12.10.26", items: [] });
+});
+
+/* ============== עריכה ידנית: העברה, הוספה, הוצאה, החלפת כלי ==============
+
+   חלוקות בנויות ביד, כדי שכל בדיקה תבודד כלל אחד ולא תלויה באקראי. */
+
+const person = (id, insts, backup = []) => ({
+  id,
+  name: id,
+  instruments: insts,
+  backup,
+  roles: [...new Set(insts.map((x) => ROLE_OF[x] || "melody"))],
+  backupRoles: [],
+});
+const sit = (s, inst = s.instruments[0]) => ({ ...s, playing: inst, slot: ROLE_OF[inst] || "melody" });
+/* שני הרכבים מלאים: תופים, בס, פסנתר, חליל. x מלודי יושב על הספסל. */
+const live = () => {
+  const d1 = person("d1", ["תופים"]), b1 = person("b1", ["בס"]), p1 = person("p1", ["פסנתר"]), f1 = person("f1", ["חליל"]);
+  const d2 = person("d2", ["תופים"]), b2 = person("b2", ["בס"]), p2 = person("p2", ["פסנתר"]), f2 = person("f2", ["חליל"]);
+  const x = person("x", ["טנור"]);
+  return {
+    groups: [
+      [d1, b1, p1, f1].map((s) => sit(s)),
+      [d2, b2, p2, f2].map((s) => sit(s)),
+    ],
+    load: { d1: 1, b1: 1, p1: 1, f1: 1, d2: 1, b2: 1, p2: 1, f2: 1 },
+    bench: [x],
+  };
+};
+const loadMatches = (res) => {
+  const n = {};
+  res.groups.flat().forEach((m) => (n[m.id] = (n[m.id] || 0) + 1));
+  assert.deepEqual(res.load, n, "העומס אינו תואם את הכיסאות בפועל");
+  res.bench.forEach((s) => assert.ok(!n[s.id], `${s.id} גם מנגן וגם יושב`));
+};
+
+test("הוצאת נגן מלודי מעבירה אותו לספסל ומורידה לו את העומס", () => {
+  const out = removePlayer(addPlayer(live(), "x", 0), { g: 0, id: "x" });
+  assert.ok(!out.error, out.error);
+  assert.ok(out.bench.some((s) => s.id === "x"));
+  assert.equal(out.load.x, undefined);
+  loadMatches(out);
+});
+
+test("אי אפשר להוציא את היחיד שממלא תפקיד חיוני בהרכב", () => {
+  const out = removePlayer(live(), { g: 0, id: "d1" });
+  assert.match(out.error, /הרכב 1 יישאר בלי תופים/);
+  assert.ok(removePlayer(live(), { g: 0, id: "f1" }).error, "הרכב נשאר בלי כלי מלודי");
+});
+
+test("מי שמנגן בשני הרכבים ויוצא מאחד נשאר בשני ולא עולה לספסל", () => {
+  const two = addPlayer(live(), "x", 0);
+  const both = addPlayer(two, "x", 1);
+  assert.equal(both.load.x, 2);
+  const out = removePlayer(both, { g: 1, id: "x" });
+  assert.ok(!out.error, out.error);
+  assert.equal(out.load.x, 1);
+  assert.ok(!out.bench.some((s) => s.id === "x"), "מי שעוד מנגן הועלה לספסל");
+  loadMatches(out);
+});
+
+test("העברה בין הרכבים לא משנה עומס ושומרת על שני ההרכבים", () => {
+  const r = addPlayer(live(), "x", 0);
+  const out = movePlayer(r, { g: 0, id: "x" }, 1);
+  assert.ok(!out.error, out.error);
+  assert.ok(out.groups[1].some((m) => m.id === "x"));
+  assert.ok(!out.groups[0].some((m) => m.id === "x"));
+  assert.equal(out.load.x, 1);
+  loadMatches(out);
+  // מי שמעבירים ממנו חייב להישאר שלם
+  assert.ok(movePlayer(live(), { g: 0, id: "b1" }, 1).error, "הרכב 1 נשאר בלי בס");
+});
+
+test("אי אפשר להעביר להרכב שהנגן כבר בו, או להרכב מלא", () => {
+  const two = addPlayer(addPlayer(live(), "x", 0), "x", 1);
+  assert.match(movePlayer(two, { g: 0, id: "x" }, 1).error, /כבר מנגן בהרכב 2/);
+
+  let full = live();
+  for (const id of ["m1", "m2", "m3"]) {
+    full = { ...full, bench: [person(id, ["טנור"])] };
+    full = addPlayer(full, id, 1);
+  }
+  assert.equal(full.groups[1].length, MAX_GROUP);
+  const r = addPlayer({ ...full, bench: [person("late", ["אלט"])] }, "late", 0);
+  assert.match(movePlayer(r, { g: 0, id: "late" }, 1).error, /מלא/);
+});
+
+test("הוספה מהספסל: הנגן עובר להרכב, והעומס הופך ל-1", () => {
+  const out = addPlayer(live(), "x", 1);
+  assert.ok(!out.error, out.error);
+  assert.equal(out.load.x, 1);
+  assert.equal(out.bench.length, 0);
+  assert.equal(out.groups[1].length, 5);
+  loadMatches(out);
+});
+
+test("הוספה לא חורגת מ-MAX_GROUP, וכלי ייחודי לא מוכפל", () => {
+  let r = live();
+  for (const id of ["m1", "m2", "m3"]) r = addPlayer({ ...r, bench: [person(id, ["טנור"])] }, id, 0);
+  assert.equal(r.groups[0].length, MAX_GROUP);
+  assert.match(addPlayer({ ...r, bench: [person("m4", ["אלט"])] }, "m4", 0).error, /מלא/);
+
+  // פסנתרן על הספסל, ובהרכב כבר יש פסנתר ואין לו כלי אחר
+  const pianist = person("pz", ["פסנתר"]);
+  const out = addPlayer({ ...live(), bench: [pianist] }, "pz", 0);
+  assert.match(out.error, /אין כיסא פנוי/);
+});
+
+test("כיסא נוסף למי שכבר מנגן: העומס עולה, ובמכסה רק אם חסר תפקיד", () => {
+  const twice = addPlayer(addPlayer(live(), "x", 0), "x", 1);
+  assert.equal(twice.load.x, 2);
+  loadMatches(twice);
+
+  // שלושה הרכבים: x כבר בשניים, ובשלישי אין חור שהוא ממלא
+  const three = { ...twice, groups: [...twice.groups, twice.groups[0].filter((m) => m.id !== "x").map((m) => ({ ...m, id: m.id + "3" }))] };
+  three.load = { ...three.load };
+  three.groups[2].forEach((m) => (three.load[m.id] = 1));
+  assert.match(addPlayer(three, "x", 2).error, /כבר מנגן ב-2 הרכבים/);
+});
+
+test("תומר נכנס להרכב אחד בלבד", () => {
+  const r = live();
+  r.groups[0] = [...r.groups[0], sit(TEACHER)];
+  r.load[TEACHER.id] = 1;
+  assert.match(addPlayer(r, TEACHER.id, 1).error, /להרכב אחד/);
+});
+
+test("החלפת כלי: משני מותר, אבל ההרכב נשאר שלם ואין כלי ייחודי כפול", () => {
+  const r = live();
+  r.groups[0] = r.groups[0].map((m) => (m.id === "p1" ? sit(person("p1", ["פסנתר"], ["חליל"]), "פסנתר") : m));
+  // הפסנתרן עובר לחליל: ההרכב נשאר בלי כלי הרמוני
+  assert.match(changeInstrument(r, { g: 0, id: "p1" }, "חליל").error, /כלי הרמוני/);
+
+  const fl = person("fl", ["חליל"], ["בס"]);
+  const q = live();
+  q.groups[0] = [...q.groups[0], sit(fl)];
+  q.load.fl = 1;
+  // בס ייחודי וכבר יש בס בהרכב
+  assert.match(changeInstrument(q, { g: 0, id: "fl" }, "בס").error, /כבר יש בס/);
+
+  // החלפה תקינה: מנגן שני כלים מלודיים
+  const m = person("m", ["חליל", "טנור"]);
+  const z = live();
+  z.groups[0] = [...z.groups[0], sit(m)];
+  z.load.m = 1;
+  const out = changeInstrument(z, { g: 0, id: "m" }, "טנור");
+  assert.ok(!out.error, out.error);
+  assert.equal(out.groups[0].find((x) => x.id === "m").playing, "טנור");
+  assert.match(changeInstrument(out, { g: 0, id: "m" }, "טנור").error, /כבר מנגן/);
+  assert.match(changeInstrument(out, { g: 0, id: "m" }, "בס").error, /לא מנגן/);
+});
+
+test("סדרת עריכות אקראית לא שוברת אף כלל", () => {
+  for (let t = 0; t < 40; t++) {
+    for (const cls of CLASSES) {
+      let r = recDraw(cls);
+      for (let step = 0; step < 25; step++) {
+        const all = [...r.groups.flatMap((g, i) => g.map((m) => ({ g: i, id: m.id }))), ...r.bench.map((s) => ({ g: BENCH, id: s.id }))];
+        const at = all[Math.floor(Math.random() * all.length)];
+        const to = Math.floor(Math.random() * r.groups.length);
+        const op = Math.floor(Math.random() * 4);
+        const insts = [...new Set(r.groups.flat().concat(r.bench).flatMap((m) => [...m.instruments, ...(m.backup || [])]))];
+        const out =
+          op === 0
+            ? movePlayer(r, at, to)
+            : op === 1
+              ? addPlayer(r, at.id, to)
+              : op === 2
+                ? removePlayer(r, at)
+                : changeInstrument(r, at, insts[Math.floor(Math.random() * insts.length)]);
+        if (out.error) continue;
+        r = out;
+        r.groups.forEach((g, i) => {
+          assert.deepEqual(missingRoles(g), [], `${cls}: הרכב ${i + 1} נשבר אחרי עריכה`);
+          assert.ok(g.length <= MAX_GROUP, `${cls}: הרכב ${i + 1} חרג מהתקרה`);
+          assert.equal(new Set(g.map((m) => m.id)).size, g.length, `${cls}: תלמיד פעמיים באותו הרכב`);
+          ["תופים", "בס", "פסנתר", "גיטרה"].forEach((inst) =>
+            assert.ok(g.filter((m) => m.playing === inst).length <= 1, `${cls}: שני ${inst} בהרכב`)
+          );
+        });
+        loadMatches(r);
+      }
+    }
+  }
+});
+
+test("ביטול עריכה: רק עריכה ידנית מתבטלת, וחלוקה חדשה מנקה את הביטול", () => {
+  const before = live();
+  const after = addPlayer(before, "x", 1);
+  let st = lessonReducer(NO_LESSON, { type: "drew", res: before, err: "", day: "d", atDraw: new Set() });
+  st = lessonReducer(st, { type: "edit", res: after, msg: "ok", undoable: true });
+  assert.equal(st.undo, before);
+  const undone = lessonReducer(st, { type: "undo" });
+  assert.equal(undone.res, before);
+  assert.equal(undone.undo, null);
+  assert.equal(undone.saved, false);
+
+  // שינוי נוכחות באמצע משנה גם את קבוצת הנעדרים — אין לבטל מעבר לו
+  const att = lessonReducer(st, { type: "edit", res: after, msg: "הצטרף" });
+  assert.equal(att.undo, null);
+  assert.equal(lessonReducer(att, { type: "undo" }), att);
+
+  assert.equal(lessonReducer(st, { type: "drew", res: before, err: "", day: "d", atDraw: new Set() }).undo, null);
+  assert.equal(lessonReducer(st, { type: "cleared" }).undo, null);
+});
+
+test("פתיחת בורר ההוספה וסימון נגן לא פתוחים יחד", () => {
+  let st = lessonReducer(NO_LESSON, { type: "adding", g: 1 });
+  assert.equal(st.adding, 1);
+  st = lessonReducer(st, { type: "select", sel: { g: 0, id: "d1" } });
+  assert.equal(st.adding, null);
+  st = lessonReducer(st, { type: "adding", g: 0 });
+  assert.equal(st.sel, null);
+  st = lessonReducer(st, { type: "edit", res: live(), msg: "" });
+  assert.equal(st.adding, null);
 });

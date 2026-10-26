@@ -751,6 +751,152 @@ function swapPlayers(res, a, b) {
   return { groups, load, bench, moved: [A.name, B.name] };
 }
 
+/* ======================= עריכה ידנית: העברה, הוספה, הוצאה =======================
+
+   ארבע פעולות נוספות על `swapPlayers`, באותו חוזה: מחזירות `{ groups, load,
+   bench, msg }` או `{ error }` עם סיבה קריאה. כולן שומרות על אותם כללים
+   כמו החלוקה האוטומטית — REQUIRED בכל הרכב, MAX_GROUP, כלי ייחודי אחד —
+   כי המורה יכול לשנות החלטה של האלגוריתם אבל לא לשבור הרכב בלי לדעת.
+   ================================================================== */
+
+const seatOrder = (a, b) => orderOf(a.playing) - orderOf(b.playing);
+const takeSeat = (s, inst) => ({ ...s, playing: inst, slot: ROLE_OF[inst] || "melody" });
+const gapText = (miss) => miss.map((r) => ROLE_MISSING[r]).join(" ובלי ");
+
+function seatAt(res, at) {
+  const pool = at.g === BENCH ? res.bench : res.groups[at.g] || [];
+  return pool.find((m) => m.id === at.id);
+}
+
+/** מי שמנגן או יושב כרגע — בהרכב כלשהו או על הספסל */
+function someoneIn(res, id) {
+  return res.bench.find((s) => s.id === id) || res.groups.flat().find((m) => m.id === id);
+}
+
+/**
+ * האם התלמיד יכול לקבל כיסא בהרכב, ובאיזה כלי. תקרת MAX_GROUP נאכפת כאן —
+ * זה מקום נוסף שבו הרכב יכול לגדול. כלי שממלא תפקיד חסר בהרכב קודם לכלי
+ * הנוכחי של התלמיד.
+ */
+function entry(group, s, n) {
+  if (group.some((m) => m.id === s.id)) return { error: `${s.name} כבר מנגן בהרכב ${n}` };
+  if (group.length >= MAX_GROUP) return { error: `הרכב ${n} מלא — ${MAX_GROUP} נגנים זה המקסימום` };
+  const gaps = missingRoles(group);
+  const options = [s.playing, ...s.instruments].filter(
+    (i) => i && s.instruments.includes(i) && (!UNIQUE.has(i) || !group.some((m) => m.playing === i))
+  );
+  if (!options.length) return { error: `אין כיסא פנוי ל${s.name} בהרכב ${n}` };
+  const fills = (i) => (gaps.includes(ROLE_OF[i] || "melody") ? 0 : 1);
+  const inst = [...options].sort((a, b) => fills(a) - fills(b))[0];
+  return { inst, fillsGap: fills(inst) === 0 };
+}
+
+/** מוציא כיסא מהרכב, ובודק שההרכב נשאר שלם */
+function without(res, at) {
+  const rest = res.groups[at.g].filter((m) => m.id !== at.id);
+  const miss = missingRoles(rest);
+  return miss.length ? { error: `הרכב ${at.g + 1} יישאר בלי ${gapText(miss)}` } : { rest };
+}
+
+/**
+ * מעביר נגן מהרכב אחד לאחר. העומס לא משתנה — הוא רק עובר כיסא.
+ * מהספסל לא מעבירים אלא מוסיפים, ולכן זה מפנה ל-addPlayer.
+ */
+function movePlayer(res, from, to) {
+  if (from.g === BENCH) return addPlayer(res, from.id, to);
+  if (from.g === to) return { error: "הוא כבר בהרכב הזה" };
+  const s = seatAt(res, from);
+  if (!s) return { error: "הנגן כבר לא בחלוקה" };
+  if (!res.groups[to]) return { error: "אין הרכב כזה" };
+  const dest = entry(res.groups[to], s, to + 1);
+  if (dest.error) return dest;
+  const left = without(res, from);
+  if (left.error) return left;
+  const groups = res.groups.map((g, i) =>
+    i === from.g ? left.rest : i === to ? [...g, takeSeat(s, dest.inst)].sort(seatOrder) : g
+  );
+  return {
+    groups,
+    load: res.load,
+    bench: res.bench,
+    msg: `${s.name} עבר מהרכב ${from.g + 1} להרכב ${to + 1} (${dest.inst}).`,
+  };
+}
+
+/**
+ * מוסיף נגן להרכב — מי שיושב על הספסל, או מי שכבר מנגן בהרכב אחר
+ * וייקח כיסא נוסף. התוספת עולה בעומס, ולכן:
+ *  - תומר נכנס להרכב אחד בלבד;
+ *  - מי שכבר ב-MAX_LOAD הרכבים מצטרף רק להרכב שחסר בו תפקיד חיוני שהוא ממלא
+ *    (אותה הקלה כמו בחלוקה, ולא רחבה ממנה).
+ */
+function addPlayer(res, id, to) {
+  const s = someoneIn(res, id);
+  if (!s) return { error: "הנגן כבר לא בחלוקה" };
+  if (!res.groups[to]) return { error: "אין הרכב כזה" };
+  const n = res.load[id] || 0;
+  if (s.teacher && n >= 1) return { error: `${s.name} נכנס להרכב אחד בלבד` };
+  const dest = entry(res.groups[to], s, to + 1);
+  if (dest.error) return dest;
+  if (n >= MAX_LOAD && !dest.fillsGap)
+    return { error: `${s.name} כבר מנגן ב-${n} הרכבים — עוד אחד רק אם ההרכב חסר תפקיד שהוא ממלא` };
+  const load = { ...res.load, [id]: n + 1 };
+  return {
+    groups: res.groups.map((g, i) => (i === to ? [...g, takeSeat(s, dest.inst)].sort(seatOrder) : g)),
+    load,
+    bench: res.bench.filter((x) => x.id !== id),
+    msg: n
+      ? `${s.name} מנגן עכשיו גם בהרכב ${to + 1} (${dest.inst}) — ×${n + 1}.`
+      : `${s.name} הצטרף להרכב ${to + 1} (${dest.inst}).`,
+  };
+}
+
+/**
+ * מוציא נגן מהרכב. מי שאין לו הרכב אחר יורד לספסל (ויקבל עדיפות בשיעור
+ * הבא); מי שמנגן גם במקום אחר פשוט מפנה את הכיסא, ולא נשכח על הספסל.
+ */
+function removePlayer(res, at) {
+  if (at.g === BENCH) return { error: "הוא כבר על הספסל" };
+  const s = seatAt(res, at);
+  if (!s) return { error: "הנגן כבר לא בחלוקה" };
+  const left = without(res, at);
+  if (left.error) return left;
+  const n = (res.load[at.id] || 1) - 1;
+  const load = { ...res.load };
+  if (n > 0) load[at.id] = n;
+  else delete load[at.id];
+  return {
+    groups: res.groups.map((g, i) => (i === at.g ? left.rest : g)),
+    load,
+    bench: n > 0 ? res.bench : [...res.bench, s],
+    msg: `${s.name} יצא מהרכב ${at.g + 1}` + (n > 0 ? ` ונשאר בהרכב אחר.` : ` ועבר לספסל.`),
+  };
+}
+
+/**
+ * מחליף את הכלי שנגן מנגן בהרכב. כלי משני מותר כאן — המורה מחליט — אבל
+ * ההרכב חייב להישאר שלם, ובכלי ייחודי אסור שיהיו שניים.
+ */
+function changeInstrument(res, at, inst) {
+  const s = at.g === BENCH ? null : seatAt(res, at);
+  if (!s) return { error: "הנגן כבר לא בהרכב" };
+  if (inst === s.playing) return { error: `${s.name} כבר מנגן ב${inst}` };
+  if (![...s.instruments, ...(s.backup || [])].includes(inst))
+    return { error: `${s.name} לא מנגן ב${inst}` };
+  const rest = res.groups[at.g].filter((m) => m.id !== at.id);
+  if (UNIQUE.has(inst) && rest.some((m) => m.playing === inst))
+    return { error: `בהרכב ${at.g + 1} כבר יש ${inst}` };
+  const next = [...rest, takeSeat(s, inst)].sort(seatOrder);
+  const miss = missingRoles(next);
+  if (miss.length) return { error: `הרכב ${at.g + 1} יישאר בלי ${gapText(miss)}` };
+  return {
+    groups: res.groups.map((g, i) => (i === at.g ? next : g)),
+    load: res.load,
+    bench: res.bench,
+    msg: `${s.name} עבר מ${s.playing} ל${inst} בהרכב ${at.g + 1}.`,
+  };
+}
+
 /* ============================ יומן נוכחות ============================ */
 
 const ATT_LABEL = { present: "נוכח", late: "איחור", absent: "חיסור", left: "יצא" };
@@ -1073,9 +1219,9 @@ function capacity(pool) {
 
 /* ============================ מצב השיעור ============================
 
-   שמונה ערכים שתמיד השתנו יחד: החלוקה, האם נשמרה, הפנקס שלפניה, תמונת
-   הנוכחות ברגע החלוקה, היום שבו נערכה, השגיאה, ההודעה והנגן שנבחר
-   להחלפה. כל מסלול היה צריך לזכור את כל ה-setters, ומסלול ששכח אחד
+   ערכים שתמיד השתנו יחד: החלוקה, האם נשמרה, הפנקס שלפניה, תמונת
+   הנוכחות ברגע החלוקה, היום שבו נערכה, השגיאה, ההודעה, הנגן שנבחר
+   לעריכה, ההרכב שמוסיפים אליו נגן, והחלוקה שלפני העריכה האחרונה. כל מסלול היה צריך לזכור את כל ה-setters, ומסלול ששכח אחד
    מהם השאיר על המסך הודעה או בחירה ממצב קודם.
 
    reducer הופך כל שינוי למעבר אחד בעל שם, ולכן אי אפשר לשכוח חצי ממנו.
@@ -1092,6 +1238,8 @@ const NO_LESSON = {
   err: "",
   msg: "",
   sel: null,
+  adding: null, // אינדקס ההרכב שפותחים בו את בורר ההוספה
+  undo: null, // החלוקה שלפני העריכה הידנית האחרונה
 };
 
 function lessonReducer(st, a) {
@@ -1101,7 +1249,7 @@ function lessonReducer(st, a) {
       return NO_LESSON;
     // החלוקה יורדת מהמסך, אבל השיעור עצמו נמשך (הפנקס שלפניו נשמר)
     case "cleared":
-      return { ...st, res: null, saved: false, err: "", msg: "", sel: null };
+      return { ...st, res: null, saved: false, err: "", msg: "", sel: null, adding: null, undo: null };
     case "drew": {
       /* תמונת הנוכחות נלקחת בחלוקה הראשונה של השיעור ונשמרת בחלוקה
          חוזרת, אחרת "חלק מחדש" היה מוחק את רישום האיחורים.
@@ -1120,18 +1268,37 @@ function lessonReducer(st, a) {
         saved: false,
         msg: "",
         sel: null,
+        adding: null,
+        undo: null,
         day: a.day ?? st.day,
         base: sameDay ? st.base : null,
         atDraw: (sameDay && st.atDraw) || a.atDraw,
       };
     }
-    // עריכה ידנית, או מי שהגיע/יצא באמצע — החלוקה משתנה בלי להיבנות מחדש
+    /* עריכה ידנית, או מי שהגיע/יצא באמצע — החלוקה משתנה בלי להיבנות מחדש.
+       רק עריכה ידנית (`undoable`) ניתנת לביטול: שינוי נוכחות משנה גם את
+       קבוצת הנעדרים, וביטולו היה משאיר את החלוקה והנוכחות לא מסונכרנות. */
     case "edit":
-      return { ...st, res: a.res ?? st.res, saved: false, err: "", msg: a.msg || "", sel: null };
+      return {
+        ...st,
+        res: a.res ?? st.res,
+        saved: false,
+        err: "",
+        msg: a.msg || "",
+        sel: null,
+        adding: null,
+        undo: a.undoable ? st.res : null,
+      };
+    case "undo":
+      return st.undo
+        ? { ...st, res: st.undo, undo: null, saved: false, msg: "העריכה האחרונה בוטלה.", sel: null, adding: null }
+        : st;
     case "msg":
       return { ...st, msg: a.msg };
     case "select":
-      return { ...st, sel: a.sel, msg: a.sel ? "" : st.msg };
+      return { ...st, sel: a.sel, adding: null, msg: a.sel ? "" : st.msg };
+    case "adding":
+      return { ...st, adding: a.g, sel: null, msg: "" };
     case "saved":
       return { ...st, saved: true, base: a.base };
     case "undone":
@@ -1252,6 +1419,10 @@ export {
   removeFromDraw,
   repairDraw,
   swapPlayers,
+  movePlayer,
+  addPlayer,
+  removePlayer,
+  changeInstrument,
   BENCH,
   buildRoster,
   forRole,

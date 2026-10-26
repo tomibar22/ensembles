@@ -165,7 +165,7 @@ export default function App() {
   const k = kPick === null ? caps.rec : Math.min(kPick, caps.max);
   const [ledger, setLedger] = useState(EMPTY);
   const [lesson, dispatch] = useReducer(lessonReducer, NO_LESSON);
-  const { res, saved, base: lessonBase, atDraw: absentAtDraw, err: drawErr, msg: liveMsg, sel } = lesson;
+  const { res, saved, base: lessonBase, atDraw: absentAtDraw, err: drawErr, msg: liveMsg, sel, adding, undo } = lesson;
 
   /* ארבעת המסכים הנוספים אינם יכולים להיות פתוחים יחד, ולכן הם ערך אחד
      ולא ארבעה בוליאנים שצריך לזכור לכבות זה את זה. */
@@ -224,7 +224,23 @@ export default function App() {
       type: "edit",
       res: { groups: out.groups, load: out.load, bench: out.bench },
       msg: `${out.moved[0]} ו${out.moved[1]} הוחלפו.`,
+      undoable: true,
     });
+  };
+  /* פעולות העריכה הידנית מחזירות { error } או חלוקה חדשה + הודעה */
+  const edit = {
+    run: (out) =>
+      out.error
+        ? dispatch({ type: "msg", msg: out.error })
+        : dispatch({
+            type: "edit",
+            res: { groups: out.groups, load: out.load, bench: out.bench },
+            msg: out.msg,
+            undoable: true,
+          }),
+    close: () => dispatch({ type: "select", sel: null }),
+    openAdd: (g) => dispatch({ type: "adding", g: adding === g ? null : g }),
+    undo: () => dispatch({ type: "undo" }),
   };
   useEffect(() => {
     setKPick(null);
@@ -838,8 +854,12 @@ export default function App() {
         {liveMsg && (
           <div
             style={{
-              border: `1px solid ${C.teal}55`,
-              background: "rgba(99,183,166,0.08)",
+              /* קבועה בראש המסך: סיבת סירוב מתחת להרכב רחוק לא אמורה להיעלם מהעין */
+              position: "sticky",
+              top: 8,
+              zIndex: 5,
+              border: `1px solid ${C.teal}88`,
+              background: C.panel,
               borderRadius: 12,
               padding: "11px 14px",
               marginBottom: 12,
@@ -858,7 +878,7 @@ export default function App() {
           </div>
         )}
 
-        {res && <Groups res={res} sel={sel} chipState={chipState} onPick={pickChip} />}
+        {res && <Groups res={res} sel={sel} chipState={chipState} onPick={pickChip} adding={adding} canUndo={!!undo} edit={edit} />}
 
         {res && (
           <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginTop: 14 }}>

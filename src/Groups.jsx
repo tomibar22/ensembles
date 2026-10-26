@@ -1,5 +1,6 @@
 import { BENCH } from "./ensembles.js";
 import { C, TINT } from "./theme.js";
+import { ChipTools, AddPicker } from "./EditTools.jsx";
 
 function Chip({ m, load, onClick, state }) {
   const tint = m.teacher ? C.teal : TINT[m.playing] || C.dim;
@@ -60,18 +61,27 @@ function Chip({ m, load, onClick, state }) {
  *
  * העריכה הידנית עובדת כאן: לחיצה על תלמיד בוחרת אותו, ואז כל מי
  * שההחלפה איתו אינה אפשרית מעומעם — עדיף להראות את זה מראש מאשר לתת
- * ללחוץ ולקבל סירוב.
+ * ללחוץ ולקבל סירוב. מתחת להרכב של הנגן הנבחר נפתחות שאר הפעולות
+ * (העברה, הוספה להרכב נוסף, החלפת כלי, הוצאה), ובכל הרכב יש ״הוסף נגן״.
  */
-export default function Groups({ res, sel, chipState, onPick }) {
+export default function Groups({ res, sel, chipState, onPick, adding, canUndo, edit }) {
   return (
     <>
-        {(
-          <p style={{ color: sel ? C.brass : C.dim, fontSize: 13, margin: "0 0 10px", lineHeight: 1.5 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, margin: "0 0 10px" }}>
+          <p style={{ color: sel ? C.brass : C.dim, fontSize: 13, margin: 0, lineHeight: 1.5 }}>
             {sel
               ? "בחר עם מי להחליף — מי שמסומן חיוור אינו אפשרי, כי זה היה שובר הרכב. לחיצה חוזרת מבטלת."
-              : "אפשר לערוך ידנית: לחץ על תלמיד ואז על מי שתרצה להחליף אותו איתו."}
+              : "אפשר לערוך ידנית: לחץ על תלמיד כדי להחליף, להעביר, להוציא או לשנות כלי. ״הוסף נגן״ מצרף נגן להרכב."}
           </p>
-        )}
+          {canUndo && (
+            <button
+              onClick={edit.undo}
+              style={{ font: "inherit", color: C.ink, cursor: "pointer", flexShrink: 0, minHeight: 40, padding: "0 12px", borderRadius: 10, fontSize: 14, background: "transparent", border: `1px solid ${C.line}` }}
+            >
+              ↶ בטל עריכה
+            </button>
+          )}
+        </div>
 
         {
           res.groups.map((g, i) => (
@@ -109,6 +119,18 @@ export default function Groups({ res, sel, chipState, onPick }) {
                   />
                 ))}
               </div>
+              {sel && sel.g === i && <ChipTools res={res} sel={sel} edit={edit} />}
+              {adding === i ? (
+                <AddPicker res={res} g={i} edit={edit} />
+              ) : (
+                <button
+                  onClick={() => edit.openAdd(i)}
+                  aria-expanded={false}
+                  style={{ font: "inherit", color: C.dim, cursor: "pointer", minHeight: 40, marginTop: 10, padding: "0 14px", borderRadius: 999, fontSize: 14, background: "transparent", border: `1px dashed ${C.line}` }}
+                >
+                  ＋ הוסף נגן
+                </button>
+              )}
             </section>
           ))}
 
@@ -142,6 +164,7 @@ export default function Groups({ res, sel, chipState, onPick }) {
                 );
               })}
             </div>
+            {sel && sel.g === BENCH && <ChipTools res={res} sel={sel} edit={edit} />}
           </section>
         )}
     </>
