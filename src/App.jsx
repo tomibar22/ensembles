@@ -175,7 +175,8 @@ export default function App() {
   const gaps = useMemo(() => emptyRoles(pool), [pool]);
   // k נגזר ולא נשמר: כך הוא לא נשאר גדול מהאפשרי אחרי שסימנו נעדרים
   const [kPick, setKPick] = useState(null); // null = ללכת אחרי ההמלצה
-  const k = kPick === null ? caps.rec : Math.min(kPick, caps.max);
+  // רק מספר שבו כולם מנגנים (`playable`); בחירה שכבר אינה אפשרית חוזרת להמלצה
+  const k = kPick !== null && caps.playable.some((o) => o.k === kPick) ? kPick : caps.rec;
   const [ledger, setLedger] = useState(EMPTY);
   const [lesson, dispatch] = useReducer(lessonReducer, NO_LESSON);
   const { res, saved, base: lessonBase, atDraw: absentAtDraw, err: drawErr, msg: liveMsg, sel, adding, undo } = lesson;
@@ -755,7 +756,7 @@ export default function App() {
             >
               {/* לכל מספר כתוב מה הוא אומר בפועל: גודל ההרכב, וכמה יישבו
                   בחוץ. קודם היה כאן רק "מומלץ", בלי שום דרך לדעת למה. */}
-              {caps.options.map((o) => (
+              {caps.playable.map((o) => (
                 <option key={o.k} value={o.k}>
                   {o.k} · {o.smallest === o.biggest ? `${o.biggest} נגנים` : `${o.smallest}–${o.biggest} נגנים`}
                   {o.bench ? ` · ${o.bench} בחוץ` : ""}

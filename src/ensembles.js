@@ -1207,14 +1207,18 @@ function options(pool, tries = 40) {
  */
 function capacity(pool) {
   const opts = options(pool);
-  if (!opts.length) return { max: 1, rec: 1, options: [] };
+  if (!opts.length) return { max: 1, rec: 1, options: [], playable: [] };
   const max = Math.max(...opts.map((o) => o.k));
   const fit = opts.filter((o) => o.fits);
   const rec = fit.length
     ? Math.min(...fit.map((o) => o.k))
     : opts.reduce((b, o) => (o.bench < b.bench || (o.bench === b.bench && o.biggest < b.biggest) ? o : b))
         .k;
-  return { max, rec, options: opts };
+  /* מה שמותר לבחור. כולם מנגנים בכל שיעור: מספר הרכבים שמושיב מישהו בחוץ
+     אינו אפשרות כשיש מספר שאין בו ישיבה. רק כשאין כזה (נעדרים רבים,
+     תפקיד שלם חסר) מציגים הכול, וכל מספר נושא את מספר היושבים שלו. */
+  const playable = fit.length ? fit : opts;
+  return { max, rec, options: opts, playable };
 }
 
 /* ============================ מצב השיעור ============================

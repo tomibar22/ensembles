@@ -1971,3 +1971,34 @@ test("הכיתה נשמרת במצב: איפוס לא מנתק אותו, וטע�
   assert.equal(st.saved, true);
   assert.equal(st.sel, null);
 });
+
+/* ====================== כולם מנגנים בכל שיעור ====================== */
+
+test("הבורר מציע רק מספרי הרכבים שבהם אף אחד לא יושב בחוץ", () => {
+  for (let t = 0; t < 8; t++)
+    each((cls, teacher) => {
+      const caps = capacity(poolOf(cls, teacher));
+      const fits = caps.options.filter((o) => o.fits);
+      assert.ok(fits.length, `${cls}: אין אף מספר שמושיב אפס`);
+      assert.deepEqual(caps.playable.map((o) => o.k), fits.map((o) => o.k));
+      assert.ok(caps.playable.some((o) => o.k === caps.rec), "ההמלצה אינה ברשימה");
+      assert.ok(caps.playable.every((o) => o.k >= caps.rec), "מספר קטן מההמלצה מושיב מישהו");
+    });
+});
+
+test("בכל מספר הרכבים שהבורר מציע, אף נוכח לא נשאר על הספסל", () => {
+  each((cls, teacher) => {
+    const pool = poolOf(cls, teacher);
+    for (const o of capacity(pool).playable) {
+      const r = bestDraw(pool, o.k, EMPTY);
+      assert.ok(r, `${cls}: אין חלוקה ל-${o.k}`);
+      assert.equal(r.bench.length, 0, `${cls}, ${o.k} הרכבים: ${r.bench.map((s) => s.name)} יושבים`);
+    }
+  });
+});
+
+test("בלי מספר מתאים (נעדרים רבים) מציגים הכול, ולא רשימה ריקה", () => {
+  // שני נוכחים בלבד: אי אפשר לבנות הרכב, אבל הבורר לא נעלם
+  const caps = capacity(ROSTERS["ט׳"].slice(0, 5));
+  assert.ok(caps.playable.length > 0 || caps.options.length === 0);
+});
