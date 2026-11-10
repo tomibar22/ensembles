@@ -59,9 +59,18 @@ import {
   rowsToLedger,
   cost,
   sheetRoster,
+  setRandom,
+  seededRandom,
   drawText,
 } from "./ensembles.js";
 import { ROSTERS, LISTS as SEED } from "./fixtures.js";
+
+/* החלוקה אקראית, ולכן הבדיקות רצות על רצף קבוע: ריצה שעברה תעבור שוב,
+   וכישלון ניתן לשחזור. `TEST_SEED=<מספר> npm test` מריץ על רצף אחר —
+   כדאי אחרי שינוי באלגוריתם, כדי לא להישען על רצף אחד שבמקרה עובר. */
+const TEST_SEED = Number(process.env.TEST_SEED) || 20261110;
+const rnd = seededRandom(TEST_SEED + 1);
+setRandom(seededRandom(TEST_SEED));
 
 const poolOf = (cls, teacher = true) => (teacher ? [...ROSTERS[cls], TEACHER] : ROSTERS[cls]);
 /* מספר ההרכבים נגזר מהנתונים ולא מקובע: עריכת רשימת התלמידים משנה את
@@ -1816,9 +1825,9 @@ test("סדרת עריכות אקראית לא שוברת אף כלל", () => {
       let r = recDraw(cls);
       for (let step = 0; step < 25; step++) {
         const all = [...r.groups.flatMap((g, i) => g.map((m) => ({ g: i, id: m.id }))), ...r.bench.map((s) => ({ g: BENCH, id: s.id }))];
-        const at = all[Math.floor(Math.random() * all.length)];
-        const to = Math.floor(Math.random() * r.groups.length);
-        const op = Math.floor(Math.random() * 4);
+        const at = all[Math.floor(rnd() * all.length)];
+        const to = Math.floor(rnd() * r.groups.length);
+        const op = Math.floor(rnd() * 4);
         const insts = [...new Set(r.groups.flat().concat(r.bench).flatMap((m) => [...m.instruments, ...(m.backup || [])]))];
         const out =
           op === 0
@@ -1827,7 +1836,7 @@ test("סדרת עריכות אקראית לא שוברת אף כלל", () => {
               ? addPlayer(r, at.id, to)
               : op === 2
                 ? removePlayer(r, at)
-                : changeInstrument(r, at, insts[Math.floor(Math.random() * insts.length)]);
+                : changeInstrument(r, at, insts[Math.floor(rnd() * insts.length)]);
         if (out.error) continue;
         r = out;
         r.groups.forEach((g, i) => {
@@ -2106,4 +2115,16 @@ test("גיבוי בלי מזהי תלמידים נדחה, ולא נקרא לפי
   const roster = ROSTERS["ט׳"];
   const old = JSON.stringify({ v: 1, c: "ט׳", l: 3, p: roster.map(() => 2), x: "" });
   assert.throws(() => decodeLedger("ט׳", roster, old), /ישן/);
+});
+
+test("אותו seed נותן אותה חלוקה, ו-seed אחר נותן אחרת", () => {
+  const pool = [...ROSTERS["י״א"], TEACHER];
+  const k = capacity(pool).rec;
+  const sig = (seed) => {
+    setRandom(seededRandom(seed));
+    return JSON.stringify(bestDraw(pool, k, EMPTY).groups.map((g) => g.map((m) => m.id)));
+  };
+  assert.equal(sig(7), sig(7));
+  assert.notEqual(sig(7), sig(8));
+  setRandom(seededRandom(TEST_SEED)); // מחזירים את הרצף לשאר הבדיקות
 });

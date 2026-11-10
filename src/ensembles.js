@@ -247,10 +247,28 @@ function sheetRoster(rows) {
 
 /* ============================ אלגוריתם ============================ */
 
+/* מקור האקראיות של החלוקה. ניתן להחלפה כדי שהבדיקות ירוצו על רצף קבוע:
+   עם Math.random כל ריצה בדקה חלוקות אחרות, ובדיקה שנכשלה פעם במאה לא
+   הייתה ניתנת לשחזור. באפליקציה עצמה זה תמיד Math.random. */
+let rnd = Math.random;
+const setRandom = (fn) => {
+  rnd = fn || Math.random;
+};
+/** מחולל פסאודו־אקראי קטן (mulberry32) — אותו seed, אותו רצף */
+function seededRandom(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = Math.imul(a ^ (a >>> 15), a | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
 const shuffle = (a0) => {
   const a = [...a0];
   for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = Math.floor(rnd() * (i + 1));
     [a[i], a[j]] = [a[j], a[i]];
   }
   return a;
@@ -298,7 +316,7 @@ function makeGroups(roster, k, ledger) {
       const rank = (s) => (s.teacher ? 0.5 : load[s.id] || 0);
       ok.sort(
         (a, b) =>
-          rank(a) - rank(b) || debt(a) - debt(b) || a.roles.length - b.roles.length || Math.random() - 0.5
+          rank(a) - rank(b) || debt(a) - debt(b) || a.roles.length - b.roles.length || rnd() - 0.5
       );
       const head = ok[0];
       const top = ok.filter(
@@ -345,7 +363,7 @@ function makeGroups(roster, k, ledger) {
         // ולכן העונש קל — מספיק כדי לפזר, לא כדי למנוע.
         const same = groups[g].filter((m) => m.playing === inst).length;
         const score =
-          melodic(g) * 100 + groups[g].length * 25 + same * 12 + fam * 6 + ord * 8 + Math.random() * 4;
+          melodic(g) * 100 + groups[g].length * 25 + same * 12 + fam * 6 + ord * 8 + rnd() * 4;
         if (score < bestScore) (bestScore = score), (best = g), (bestInst = inst);
       });
     }
@@ -415,7 +433,7 @@ function enrichHarmony(res, roster, ledger) {
         (load[a.id] || 0) - (load[b.id] || 0) ||
         (ledger.plays[a.id] || 0) - (ledger.plays[b.id] || 0) ||
         fam(a) - fam(b) ||
-        Math.random() - 0.5
+        rnd() - 0.5
     );
     const pick = cands[0];
     const inst = instFor(pick, "harmony");
@@ -452,7 +470,7 @@ function cost(res, ledger) {
   res.groups.forEach((g) =>
     g.forEach((a, i) => g.slice(i + 1).forEach((b) => (variety += ledger.pairs[pairKey(a.id, b.id)] || 0)))
   );
-  return fairness * 4 + variety + Math.random() * 0.5;
+  return fairness * 4 + variety + rnd() * 0.5;
 }
 
 function bestDraw(roster, k, ledger, tries = 160) {
@@ -551,7 +569,7 @@ function addToDraw(res, student, ledger) {
   });
   if (swaps.length) {
     swaps.sort(
-      (a, b) => b.busy - a.busy || a.fam - b.fam || a.ord - b.ord || Math.random() - 0.5
+      (a, b) => b.busy - a.busy || a.fam - b.fam || a.ord - b.ord || rnd() - 0.5
     );
     const pick = swaps[0];
     const nextLoad = { ...load, [student.id]: (load[student.id] || 0) + 1 };
@@ -1490,6 +1508,8 @@ export {
   buildRoster,
   forRole,
   pairKey,
+  setRandom,
+  seededRandom,
   makeGroups,
   attempt,
   cost,
