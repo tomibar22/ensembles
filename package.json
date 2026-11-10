@@ -8,7 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "node --test",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "check:sync": "node scripts/sheet-sync.check.mjs && node scripts/sync-expiry.check.mjs"
   },
   "dependencies": {
     "react": "^18.3.1",

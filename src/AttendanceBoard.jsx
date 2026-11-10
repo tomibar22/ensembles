@@ -52,12 +52,12 @@ export default function AttendanceBoard({
           <span style={{ fontSize: 15, color: absent.size ? C.rose : C.dim }}>
             {absent.size ? `${present.length}/${roster.length} נוכחים` : "כולם נוכחים"}
           </span>
-          <button onClick={onOpen} style={{ ...ghost(C.ink), padding: "9px 13px", fontSize: 14 }}>
+          <button onClick={onOpen} style={{ ...ghost(C.ink), padding: "0 13px", minHeight: 44, fontSize: 14 }}>
             שנה נוכחות
           </button>
           <button
             onClick={onDraw}
-            style={{ ...btn(C.teal, C.onTeal), padding: "9px 15px", fontSize: 15, marginRight: "auto" }}
+            style={{ ...btn(C.teal, C.onTeal), padding: "0 15px", minHeight: 44, fontSize: 15, marginRight: "auto" }}
           >
             חלק מחדש
           </button>
@@ -163,7 +163,7 @@ export default function AttendanceBoard({
           {hasDraw ? "חלק מחדש" : `חלק את ${present.length} הנוכחים ל-${k} הרכבים`}
         </button>
         {absent.size > 0 && (
-          <button onClick={onClearAbsent} style={{ ...ghost(), padding: "8px 14px", fontSize: 14 }}>
+          <button onClick={onClearAbsent} style={{ ...ghost(), padding: "0 14px", minHeight: 44, fontSize: 14 }}>
             כולם נוכחים
           </button>
         )}
