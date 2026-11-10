@@ -4,7 +4,7 @@
    שמחזיק שיעור שעוד לא הספיק להיכתב. כל פונקציה כאן תלויה ב-`cls` בלבד
    ולא במצב של React, ולכן אינה יכולה לפגר אחרי החלפת כיתה. */
 
-import { KEYS, TABS, SEED, EMPTY, TEACHER, buildRoster, packLesson, unpackLesson } from "./ensembles.js";
+import { KEYS, TABS, EMPTY, TEACHER, buildRoster, packLesson, unpackLesson } from "./ensembles.js";
 
 const store = {
   get(k) {
@@ -61,8 +61,9 @@ function cachedRoster(cls) {
     return null;
   }
 }
-export const loadRosterList = (cls) => cachedRoster(cls) || SEED[cls];
-/** האם יש במכשיר רשימה אמיתית של הכיתה, ולא רק הזרע שבקוד */
+// מכשיר חדש מתחיל מרשימה ריקה: בקוד אין שמות של תלמידים
+export const loadRosterList = (cls) => cachedRoster(cls) || [];
+/** האם יש במכשיר רשימה של הכיתה. רשימה ריקה לעולם אינה נכתבת לגיליון */
 export const hasRoster = (cls) => !!cachedRoster(cls);
 export const saveRosterList = (cls, list) => writeJSON(ROSTER_KEY(cls), list);
 

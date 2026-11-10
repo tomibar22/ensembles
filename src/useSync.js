@@ -40,16 +40,19 @@ import {
  * להעלות רשימה שנערכה בלי חיבור.
  *
  * הרשימה אינה נכתבת בכל שמירה: היא נערכת גם בגיליון עצמו, ומכשיר שלא
- * משך מאז היה דורס את העריכה הזאת. ורשימה שהיא רק הזרע שבקוד לעולם
- * אינה נכתבת.
+ * משך מאז היה דורס את העריכה הזאת. ומכשיר שאין בו רשימה לעולם אינו
+ * כותב אחת.
  */
 async function pushAll(cls, { roster }) {
+  /* הפנקס נכתב שורה לכל תלמיד שברשימה. בלי רשימה הוא היה נכתב ריק —
+     ומוחק מהגיליון את מספר ההרכבים של כל הכיתה. */
+  if (!hasRoster(cls)) throw new Error("אין במכשיר רשימת כיתה — טען אותה מהגיליון לפני שמירה");
   const list = loadRosterList(cls);
   const tabs = [
     { tab: TABS[cls], rows: ledgerToRows(buildRoster(list), loadLedger(cls)), cols: 4 },
     { tab: ATT_TAB(cls), rows: attToRows(loadAtt(cls)), cols: 5 },
   ];
-  if (roster && hasRoster(cls)) tabs.unshift({ tab: ROSTER_TAB(cls), rows: rosterToRows(list), cols: 5 });
+  if (roster) tabs.unshift({ tab: ROSTER_TAB(cls), rows: rosterToRows(list), cols: 5 });
   await Sheets.writeTabs(tabs);
 }
 
@@ -90,13 +93,25 @@ export function useSync(cls, onPulled) {
     if (!Sheets.connected()) return;
     setBusy(true);
     try {
+      /* מכשיר בלי רשימה מקבל אותה לפני כל דבר אחר: גם ההעלאה נשענת
+         עליה, ובלעדיה אין מה להציג. */
+      let fetched = null;
+      if (!hasRoster(cls)) {
+        const got = sheetRoster(await Sheets.readRows(ROSTER_TAB(cls), 5));
+        if (got.ok) {
+          fetched = got.list;
+          saveRosterList(cls, fetched);
+        }
+      }
       const rows = await Sheets.readRows(TABS[cls]);
       const sheetLessons = Number((rows[0] || [])[1]) || 0;
       const local = loadLedger(cls);
 
       if (syncDirection(local, { lessons: sheetLessons }, loadPending(cls)) === "push") {
-        await pushAll(cls, { roster: true });
+        // רשימה שנמשכה זה עתה אינה חוזרת לגיליון — היא הגיעה ממנו
+        await pushAll(cls, { roster: !fetched });
         mark(false);
+        if (fetched) pulled.current({ list: fetched, ledger: local, log: loadAtt(cls) });
         setMsg(`מה שנשמר במכשיר הועלה לגיליון · ${local.lessons} שיעורים`);
         return;
       }

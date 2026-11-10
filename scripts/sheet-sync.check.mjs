@@ -11,7 +11,7 @@
  *   npm i --no-save playwright && node scripts/sheet-sync.check.mjs
  */
 import { chromium } from "playwright";
-import { SEED } from "../src/ensembles.js";
+import { LISTS } from "../src/fixtures.js";
 
 /* גיליון מזויף בזיכרון: מאפשר לבדוק את מסלול הסנכרון בלי OAuth אמיתי. */
 const SHEET_INIT = `
@@ -41,12 +41,12 @@ const b = await chromium.launch(EXE ? { executablePath: EXE } : {});
 const p = await b.newPage({ viewport: { width: 390, height: 900 } });
 await p.addInitScript(SHEET_INIT);
 
-/* רשימות הכיתה במטמון, כמו במכשיר שכבר עבד. רק רשימה אמיתית שבמכשיר
-   עולה לגיליון — הזרע שבקוד לא — ולכן בלעדיהן אין מה לבדוק. */
+/* רשימות הכיתה במטמון, כמו במכשיר שכבר עבד: בקוד אין רשימות, ומכשיר
+   בלי רשימה מציג לוח ריק. הכיתות כאן בדויות (src/fixtures.js). */
 await p.addInitScript((seed) => {
   for (const [key, list] of Object.entries(seed))
     if (!localStorage.getItem(key)) localStorage.setItem(key, JSON.stringify(list));
-}, { "ens-roster-g9": SEED["ט׳"], "ens-roster-g11": SEED["י״א"] });
+}, { "ens-roster-g9": LISTS["ט׳"], "ens-roster-g11": LISTS["י״א"] });
 
 /* הספרייה האמיתית של גוגל נטענת מ-index.html ודורסת את window.google
    המזויף — ואז שום דבר לא מתחבר וכל הבדיקות נכשלות בלי קשר לקוד. */
@@ -137,10 +137,10 @@ const board = await p.locator("section").filter({ hasText: "מי כאן היום
 console.log("על לוח ט׳ מופיעים:", board.slice(0, 6).map((t) => t.trim()).join(", "));
 
 check(
-  !names9.includes("מעיין") && !names9.includes("גבריאל"),
+  !names9.includes("רון") && !names9.includes("יואב"),
   "לשונית 'תלמידים ט׳' לא קיבלה את תלמידי י״א"
 );
-check(names9.includes("אילה") || names9.includes("ניב"), "לשונית 'תלמידים ט׳' קיבלה את תלמידי ט׳");
+check(names9.includes("נועה") || names9.includes("אריאל"), "לשונית 'תלמידים ט׳' קיבלה את תלמידי ט׳");
 check(names9.length === 14, `בלשונית ט׳ יש 14 תלמידים (בפועל ${names9.length})`);
 
 /* החצי השני של אותו באג: הפנקס. לי״א יש שיעור שמור, לט׳ אין —
@@ -156,7 +156,7 @@ await p.waitForTimeout(1800);
 const after = await p.evaluate(() => window.__sheet);
 const names9b = (after["תלמידים ט׳"] || []).slice(1).map((r) => r[0]);
 check(
-  !names9b.includes("מעיין") && names9b.length === 14,
+  !names9b.includes("רון") && names9b.length === 14,
   "גם אחרי החלפה מהירה הלוך ושוב, ט׳ נשארה עם התלמידים שלה"
 );
 const board2 = await p
@@ -165,7 +165,7 @@ const board2 = await p
   .first()
   .locator("button")
   .allTextContents();
-check(!board2.some((t) => t.trim() === "מעיין"), "לוח הנוכחות מציג את ט׳ ולא את י״א");
+check(!board2.some((t) => t.trim() === "רון"), "לוח הנוכחות מציג את ט׳ ולא את י״א");
 
 /* ================== איחור: מי שהגיע רק אחרי החלוקה ==================
 
@@ -173,8 +173,8 @@ check(!board2.some((t) => t.trim() === "מעיין"), "לוח הנוכחות מ�
    נכנס לכיתה ומוחזר ללוח. ההפרש בין הנוכחות בזמן החלוקה לנוכחות בסוף
    הוא כל מה שמבדיל "איחור" מ"חיסור", והוא חי בזיכרון בלבד — אם הוא
    נשבר, הגיליון פשוט מקבל חיסור במקום איחור בלי שום שגיאה. */
-const LATE = "אביגיל";
-const OUT = "עדאל";
+const LATE = "רותם";
+const OUT = "שקד";
 
 await p.getByRole("button", { name: LATE, exact: true }).click();
 await p.getByRole("button", { name: OUT, exact: true }).click();
@@ -182,7 +182,7 @@ await p.waitForTimeout(200);
 await p.getByRole("button", { name: /חלק את/ }).click();
 await p.waitForTimeout(900);
 
-// אביגיל נכנסת לכיתה אחרי שההרכבים כבר חולקו
+// רותם נכנסת לכיתה אחרי שההרכבים כבר חולקו
 await p.getByRole("button", { name: "שנה נוכחות" }).click();
 await p.waitForTimeout(200);
 await p.getByRole("button", { name: LATE, exact: true }).click();
@@ -199,10 +199,10 @@ check(cell(OUT, 4) === "חיסור", `${OUT} נרשם בגיליון כחיסו�
 check(att.length === 2, `ביומן רק שתי שורות — נוכח רגיל אינו נרשם (בפועל ${att.length})`);
 check(cell(LATE, 3) !== "", "שורת האיחור נושאת מזהה, ולא רק שם");
 
-/* ותיקון נוכחות אחרי השמירה: מאיה יוצאת באמצע, והשיעור נשמר שוב.
+/* ותיקון נוכחות אחרי השמירה: דנה יוצאת באמצע, והשיעור נשמר שוב.
    זו השמירה שמחליפה את שורות היומן — ואם היא מוסיפה במקום להחליף,
    הגיליון מתמלא בכפילויות של אותו שיעור. */
-await p.getByRole("button", { name: "מאיה", exact: true }).click();
+await p.getByRole("button", { name: "דנה", exact: true }).click();
 await p.waitForTimeout(400);
 await p.getByRole("button", { name: /עדכן את השיעור/ }).click();
 await p.waitForTimeout(1200);
@@ -211,7 +211,7 @@ const again = ((await p.evaluate(() => window.__sheet))["נוכחות ט׳"] || 
 const cell2 = (n, i) => (again.find((r) => r[2] === n) || [])[i] || "";
 console.log("אחרי העדכון:", again.map((r) => `${r[2]}=${r[4]}`).join(", "));
 check(again.length === 3, `העדכון החליף את שורות השיעור ולא הכפיל אותן (בפועל ${again.length})`);
-check(cell2("מאיה", 4) === "יצא", `מאיה נרשמה כיצאה באמצע (בפועל: ${cell2("מאיה", 4) || "לא נרשמה"})`);
+check(cell2("דנה", 4) === "יצא", `דנה נרשמה כיצאה באמצע (בפועל: ${cell2("דנה", 4) || "לא נרשמה"})`);
 check(cell2(LATE, 4) === "איחור", "האיחור נשמר גם אחרי העדכון");
 check(new Set(again.map((r) => r[1])).size === 1, "כל השורות שייכות לאותו מספר שיעור");
 
@@ -233,7 +233,7 @@ check(
 /* ועריכה נוספת ושמירה מעדכנות את אותו שיעור */
 await p.getByRole("button", { name: "שנה נוכחות" }).click();
 await p.waitForTimeout(200);
-await p.getByRole("button", { name: "מאיה", exact: true }).click();
+await p.getByRole("button", { name: "דנה", exact: true }).click();
 await p.waitForTimeout(400);
 await p.getByRole("button", { name: /עדכן את השיעור/ }).click();
 await p.waitForTimeout(1200);

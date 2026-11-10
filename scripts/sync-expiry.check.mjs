@@ -12,7 +12,7 @@
  *   npm i --no-save playwright && node scripts/sync-expiry.check.mjs
  */
 import { chromium } from "playwright";
-import { SEED } from "../src/ensembles.js";
+import { LISTS } from "../src/fixtures.js";
 
 const SHEET_INIT = `
   window.__sheet = {};
@@ -45,12 +45,12 @@ const b = await chromium.launch(EXE ? { executablePath: EXE } : {});
 const p = await b.newPage({ viewport: { width: 390, height: 900 } });
 await p.addInitScript(SHEET_INIT);
 
-/* רשימות הכיתה במטמון, כמו במכשיר שכבר עבד. רק רשימה אמיתית שבמכשיר
-   עולה לגיליון — הזרע שבקוד לא — ולכן בלעדיהן אין מה לבדוק. */
+/* רשימות הכיתה במטמון, כמו במכשיר שכבר עבד: בקוד אין רשימות, ומכשיר
+   בלי רשימה מציג לוח ריק. הכיתות כאן בדויות (src/fixtures.js). */
 await p.addInitScript((seed) => {
   for (const [key, list] of Object.entries(seed))
     if (!localStorage.getItem(key)) localStorage.setItem(key, JSON.stringify(list));
-}, { "ens-roster-g9": SEED["ט׳"], "ens-roster-g11": SEED["י״א"] });
+}, { "ens-roster-g9": LISTS["ט׳"], "ens-roster-g11": LISTS["י״א"] });
 
 /* הספרייה האמיתית של גוגל נטענת מ-index.html ודורסת את window.google
    המזויף — ואז שום דבר לא מתחבר וכל הבדיקות נכשלות בלי קשר לקוד. */
@@ -151,14 +151,14 @@ check(msg, "ההודעה אומרת במפורש שהשמירה היא במכש�
 /* ותיקון שם, באותו חלון בלי חיבור */
 await p.getByRole("button", { name: "רשימת הכיתה" }).click();
 await p.waitForTimeout(600);
-const firstName = p.locator('input[aria-label="שם פרטי"][value="אוריה"]').first();
+const firstName = p.locator('input[aria-label="שם פרטי"][value="בן"]').first();
 const hasEditor = await firstName.count();
 if (hasEditor) {
-  await firstName.fill("אוריה-בדיקה");
+  await firstName.fill("בן-בדיקה");
   await p.getByRole("button", { name: /שמור את הרשימה/ }).click();
   await p.waitForTimeout(800);
 } else {
-  console.log("(שדה השם של אוריה לא נמצא — מדלג על חלק תיקון השם)");
+  console.log("(שדה השם של בן לא נמצא — מדלג על חלק תיקון השם)");
 }
 
 /* מתחברים מחדש — הרגע שבו הבאג מחק את מה שנשמר במכשיר */
@@ -171,25 +171,25 @@ check(g9Final === 1, `אחרי החיבור מחדש השיעור של ט׳ על
 
 if (hasEditor) {
   const names = ((await sheet())["תלמידים ט׳"] || []).slice(1).map((r) => r[0]);
-  check(names.includes("אוריה-בדיקה"), `גם תיקון השם עלה לגיליון (${names.slice(0, 3).join(", ")}…)`);
+  check(names.includes("בן-בדיקה"), `גם תיקון השם עלה לגיליון (${names.slice(0, 3).join(", ")}…)`);
 }
 
 /* ותיקון שם **בזמן שהחיבור חי**: הוא חייב להגיע גם ללשונית הפנקס ולא רק
    לרשימה. השם שם הוא עותק לצד המזהה, וקודם הוא התרענן רק בשמירת שיעור —
-   וכך "סמואל" נשאר ב-g9 אחרי שהשם כבר תוקן ברשימה. */
+   וכך "בנימין" נשאר ב-g9 אחרי שהשם כבר תוקן ברשימה. */
 await p.getByRole("button", { name: "רשימת הכיתה" }).click();
 await p.waitForTimeout(600);
-const live = p.locator('input[aria-label="שם פרטי"][value="אוריה-בדיקה"]').first();
+const live = p.locator('input[aria-label="שם פרטי"][value="בן-בדיקה"]').first();
 if (await live.count()) {
-  await live.fill("אוריה-חי");
+  await live.fill("בן-חי");
   await p.getByRole("button", { name: /שמור את הרשימה/ }).click();
   await p.waitForTimeout(1200);
   const after = await sheet();
   const inRoster = (after["תלמידים ט׳"] || []).slice(1).map((r) => r[0]);
   const inLedger = (after["g9"] || []).slice(2).map((r) => r[0]);
-  check(inRoster.includes("אוריה-חי"), "השם המתוקן נכתב ללשונית התלמידים");
+  check(inRoster.includes("בן-חי"), "השם המתוקן נכתב ללשונית התלמידים");
   check(
-    inLedger.includes("אוריה-חי") && !inLedger.includes("אוריה-בדיקה"),
+    inLedger.includes("בן-חי") && !inLedger.includes("בן-בדיקה"),
     `השם המתוקן רוענן גם בלשונית הפנקס g9 (${inLedger.slice(0, 4).join(", ")}…)`
   );
 } else {

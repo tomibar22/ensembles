@@ -33,6 +33,18 @@ export default function AttendanceBoard({
   onOpen,
   onDraw,
 }) {
+  /* מכשיר חדש: הרשימה חיה בגיליון ובמטמון, לא בקוד. אומרים מאיפה היא
+     תגיע במקום להציג לוח ריק עם כפתור חלוקה שאין לו מה לחלק. */
+  if (!roster.length)
+    return (
+      <section style={WRAP}>
+        <h2 style={{ fontFamily: "'Frank Ruhl Libre', serif", fontSize: 20, margin: "0 0 6px" }}>אין עדיין רשימת כיתה במכשיר הזה</h2>
+        <p style={{ color: C.dim, fontSize: 15, margin: 0, lineHeight: 1.6 }}>
+          לחץ על ״גיליון״ למעלה כדי לטעון אותה מהגיליון, או הוסף תלמידים ב״רשימת הכיתה״.
+        </p>
+      </section>
+    );
+
   if (!open)
     return (
       <section style={WRAP}>
