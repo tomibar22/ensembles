@@ -15,7 +15,7 @@ function Chip({ m, load, onClick, state }) {
         font: "inherit",
         color: "inherit",
         cursor: "pointer",
-        opacity: blocked ? 0.3 : 1,
+        opacity: blocked ? 0.45 : 1, // מעומעם אבל קריא; ב-0.3 השם כמעט נעלם
         transition: "opacity .12s",
         display: "flex",
         alignItems: "center",
@@ -125,7 +125,6 @@ export default function Groups({ res, sel, chipState, onPick, adding, canUndo, e
               ) : (
                 <button
                   onClick={() => edit.openAdd(i)}
-                  aria-expanded={false}
                   style={{ font: "inherit", color: C.dim, cursor: "pointer", minHeight: 40, marginTop: 10, padding: "0 14px", borderRadius: 999, fontSize: 14, background: "transparent", border: `1px dashed ${C.line}` }}
                 >
                   ＋ הוסף נגן
@@ -156,7 +155,7 @@ export default function Groups({ res, sel, chipState, onPick, adding, canUndo, e
                       fontSize: 15,
                       background: state === "selected" ? C.brass + "2E" : "transparent",
                       border: state === "selected" ? `2px solid ${C.brass}` : `1px solid ${C.line}`,
-                      opacity: state === "blocked" ? 0.3 : 1,
+                      opacity: state === "blocked" ? 0.45 : 1,
                     }}
                   >
                     {st.name} <span style={{ color: C.dim, fontSize: 13 }}>{st.instruments[0]}</span>

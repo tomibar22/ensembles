@@ -19,7 +19,7 @@ function Pill({ ok = true, on = false, danger = false, onClick, children }) {
         color: on ? C.onBrass : danger ? C.rose : C.ink,
         background: on ? C.brass : "transparent",
         border: `1px solid ${on ? C.brass : danger ? C.rose + "88" : C.line}`,
-        opacity: ok || on ? 1 : 0.35,
+        opacity: ok || on ? 1 : 0.5,
         transition: "opacity .12s",
       }}
     >
