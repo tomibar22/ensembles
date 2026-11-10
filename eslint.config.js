@@ -43,6 +43,10 @@ export default [
     files: ["src/**/*.test.js"],
     languageOptions: { globals: { ...globals.node } },
   },
+  {
+    files: ["public/sw.js"],
+    languageOptions: { ecmaVersion: 2022, sourceType: "script", globals: { ...globals.serviceworker } },
+  },
   /* בדיקות שרצות בדפדפן דרך playwright: קוד Node שמריץ, ובתוכו קטעים
      שמוערכים בדף עצמו — ולכן שתי מערכות הגלובלים. */
   {
