@@ -24,8 +24,29 @@ let client = null;
 
 export const connected = () => !!token && Date.now() < expiry;
 
+/* בקשת הטוקן שבדרך, אם יש. שתי לחיצות רצופות מחכות לאותה תשובה. */
+let asking = null;
+const CONNECT_TIMEOUT = 120000;
+
+const POPUP_ERRORS = {
+  popup_closed: "חלון ההתחברות נסגר לפני שהסתיים",
+  popup_failed_to_open: "הדפדפן חסם את חלון ההתחברות — אפשר חלונות קופצים לאתר ונסה שוב",
+};
+
+/**
+ * מבקש טוקן מגוגל. תמיד מסתיים — בהצלחה או בשגיאה.
+ *
+ * קודם לא היה `error_callback`: חלון שנסגר או נחסם (נפוץ בטלפון) לא
+ * החזיר דבר, וההבטחה נשארה תלויה — הכפתור נתקע על "מסנכרן…" עד רענון.
+ * הטיימר הוא רשת ביטחון למקרה שגוגל לא קורא לאף אחד מהשניים.
+ *
+ * `prompt: ""` — גוגל מציג הסכמה רק כשבאמת חסרה הרשאה. קודם נדרש מסך
+ * הסכמה מלא בכל פתיחה של האפליקציה.
+ */
 export function connect() {
-  return new Promise((resolve, reject) => {
+  if (asking) return asking;
+  let timer = null;
+  asking = new Promise((resolve, reject) => {
     const g = window.google && window.google.accounts && window.google.accounts.oauth2;
     if (!g) return reject(new Error("הספרייה של גוגל לא נטענה — בדוק חיבור לרשת"));
     if (!client) {
@@ -38,12 +59,19 @@ export function connect() {
           expiry = Date.now() + (r.expires_in - 60) * 1000;
           client._resolve(true);
         },
+        error_callback: (e) =>
+          client._reject(new Error(POPUP_ERRORS[e && e.type] || "ההתחברות לגוגל לא הושלמה")),
       });
     }
     client._resolve = resolve;
     client._reject = reject;
-    client.requestAccessToken({ prompt: token ? "" : "consent" });
+    timer = setTimeout(() => reject(new Error("ההתחברות לגוגל לא הושלמה בזמן — נסה שוב")), CONNECT_TIMEOUT);
+    client.requestAccessToken({ prompt: "" });
+  }).finally(() => {
+    clearTimeout(timer);
+    asking = null;
   });
+  return asking;
 }
 
 async function api(path, opts = {}) {
@@ -62,16 +90,25 @@ async function api(path, opts = {}) {
   return res.json();
 }
 
+/** מזהי הלשוניות לפי שם. לשונית שאינה קיימת נוצרת — כולן בקריאה אחת. */
+async function tabIds(tabs) {
+  const meta = await api("?fields=sheets.properties(sheetId,title)");
+  const ids = {};
+  (meta.sheets || []).forEach((sh) => (ids[sh.properties.title] = sh.properties.sheetId));
+  const missing = [...new Set(tabs)].filter((t) => !(t in ids));
+  if (missing.length) {
+    const r = await api(":batchUpdate", {
+      method: "POST",
+      body: JSON.stringify({ requests: missing.map((title) => ({ addSheet: { properties: { title } } })) }),
+    });
+    r.replies.forEach((rep, i) => (ids[missing[i]] = rep.addSheet.properties.sheetId));
+  }
+  return ids;
+}
+
 /** מזהה הלשונית המספרי, ויוצר אותה אם אינה קיימת */
 export async function tabId(tab) {
-  const meta = await api("?fields=sheets.properties(sheetId,title)");
-  const found = (meta.sheets || []).find((sh) => sh.properties.title === tab);
-  if (found) return found.properties.sheetId;
-  const r = await api(":batchUpdate", {
-    method: "POST",
-    body: JSON.stringify({ requests: [{ addSheet: { properties: { title: tab } } }] }),
-  });
-  return r.replies[0].addSheet.properties.sheetId;
+  return (await tabIds([tab]))[tab];
 }
 
 const COL = (n) => String.fromCharCode(64 + n); // 4 → "D"
@@ -99,19 +136,27 @@ const cell = (v) =>
  * או שהכול נכתב, או ששום דבר לא משתנה ומה שהיה קודם נשאר שלם.
  */
 export async function writeRows(tab, rows, cols = 4) {
-  const sheetId = await tabId(tab);
+  await writeTabs([{ tab, rows, cols }]);
+}
+
+/**
+ * כותב כמה לשוניות יחד — `[{ tab, rows, cols }]` — ב-batchUpdate אחד.
+ * אטומי בין הלשוניות: הפנקס ויומן הנוכחות של אותו שיעור נכתבים שניהם או
+ * אף אחד. קודם אלה היו קריאות נפרדות, וכשל ביניהן השאיר שיעור בפנקס
+ * בלי שורות הנוכחות שלו.
+ */
+export async function writeTabs(tabs) {
+  const ids = await tabIds(tabs.map((t) => t.tab));
   await api(":batchUpdate", {
     method: "POST",
     body: JSON.stringify({
-      requests: [
-        {
-          updateCells: {
-            range: { sheetId, startRowIndex: 0, startColumnIndex: 0, endColumnIndex: cols },
-            fields: "userEnteredValue",
-            rows: rows.map((r) => ({ values: r.map(cell) })),
-          },
+      requests: tabs.map(({ tab, rows, cols = 4 }) => ({
+        updateCells: {
+          range: { sheetId: ids[tab], startRowIndex: 0, startColumnIndex: 0, endColumnIndex: cols },
+          fields: "userEnteredValue",
+          rows: rows.map((r) => ({ values: r.map(cell) })),
         },
-      ],
+      })),
     }),
   });
 }

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readRows, writeRows, readDoc } from "./sheets.js";
+import { readRows, writeRows, writeTabs, readDoc, connect, connected } from "./sheets.js";
 
 /* fetch מזויף שמתעד את הקריאות, כדי לבדוק את צורת הבקשות בלי רשת */
 function stubFetch(handler) {
@@ -105,4 +105,33 @@ test("readDoc: קורא מ-Docs API, ו-403 מוסבר במקום להיבלע",
 
   globalThis.fetch = async () => ({ ok: false, status: 403, text: async () => "" });
   await assert.rejects(readDoc("abc"), /Google Docs API/);
+});
+
+test("כמה לשוניות נכתבות בקריאה אחת, ולשוניות חסרות נוצרות יחד", async () => {
+  const calls = stubFetch((url, opts) => {
+    if (!opts.method) return META;
+    const body = JSON.parse(opts.body);
+    if (body.requests[0].addSheet)
+      return { replies: body.requests.map((r, i) => ({ addSheet: { properties: { sheetId: 100 + i, title: r.addSheet.properties.title } } })) };
+    return {};
+  });
+  await writeTabs([
+    { tab: "g9", rows: ROWS },
+    { tab: "נוכחות ט׳", rows: [["תאריך"]], cols: 5 },
+    { tab: "תלמידים ט׳", rows: [["שם"]], cols: 5 },
+  ]);
+  const posts = calls.filter((c) => c.method === "POST").map((c) => JSON.parse(c.body).requests);
+  assert.equal(posts.length, 2, "יצירת הלשוניות החסרות, ואז כתיבה אחת לכולן");
+  assert.equal(posts[0].length, 2);
+  assert.deepEqual(posts[1].map((r) => r.updateCells.range.sheetId), [42, 100, 101]);
+  assert.equal(posts[1][1].updateCells.range.endColumnIndex, 5);
+});
+
+test("חלון התחברות שנסגר מסיים את ההתחברות בשגיאה, ולא משאיר אותה תלויה (רגרסיה)", async () => {
+  let cfg;
+  globalThis.window = {
+    google: { accounts: { oauth2: { initTokenClient: (c) => ((cfg = c), { requestAccessToken: () => cfg.error_callback({ type: "popup_closed" }) }) } } },
+  };
+  await assert.rejects(connect(), /נסגר/);
+  assert.equal(connected(), false);
 });

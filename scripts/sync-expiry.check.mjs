@@ -61,33 +61,38 @@ await p.route("https://sheets.googleapis.com/**", async (route) => {
   }
   if (method === "POST" && url.includes(":batchUpdate")) {
     const body = JSON.parse(route.request().postData() || "{}");
-    const req = (body.requests || [])[0] || {};
-    if (req.addSheet) {
-      const title = req.addSheet.properties.title;
-      const id = await p.evaluate((t) => {
-        window.__sheet[t] = window.__sheet[t] || [];
-        window.__ids[t] = window.__ids[t] || window.__nextId++;
-        return window.__ids[t];
-      }, title);
-      return json({ replies: [{ addSheet: { properties: { sheetId: id, title } } }] });
+    // כל הבקשות שבאצווה, לפי הסדר — כתיבה של כמה לשוניות מגיעה בקריאה אחת
+    const replies = [];
+    for (const req of body.requests || []) {
+      if (req.addSheet) {
+        const title = req.addSheet.properties.title;
+        const id = await p.evaluate((t) => {
+          window.__sheet[t] = window.__sheet[t] || [];
+          window.__ids[t] = window.__ids[t] || window.__nextId++;
+          return window.__ids[t];
+        }, title);
+        replies.push({ addSheet: { properties: { sheetId: id, title } } });
+      } else if (req.updateCells) {
+        const id = req.updateCells.range.sheetId;
+        const rows = (req.updateCells.rows || []).map((r) =>
+          (r.values || []).map((c) =>
+            c.userEnteredValue ? (c.userEnteredValue.stringValue ?? String(c.userEnteredValue.numberValue)) : ""
+          )
+        );
+        await p.evaluate(
+          ([sid, rws]) => {
+            // מיפוי מדויק לפי המזהה, ולא לפי מיקום — אחרת הבדיקה עצמה משקרת
+            const title = Object.keys(window.__ids).find((t) => window.__ids[t] === sid);
+            if (!title) throw new Error("כתיבה ללשונית לא מוכרת: " + sid);
+            window.__sheet[title] = rws;
+            (window.__writes = window.__writes || []).push({ title, first: (rws[2] || rws[1] || [])[0] || "", count: rws.length });
+          },
+          [id, rows]
+        );
+        replies.push({});
+      }
     }
-    if (req.updateCells) {
-      const id = req.updateCells.range.sheetId;
-      const rows = (req.updateCells.rows || []).map((r) =>
-        (r.values || []).map((c) =>
-          c.userEnteredValue ? (c.userEnteredValue.stringValue ?? String(c.userEnteredValue.numberValue)) : ""
-        )
-      );
-      await p.evaluate(
-        ([sid, rws]) => {
-          const title = Object.keys(window.__ids).find((t) => window.__ids[t] === sid);
-          if (!title) throw new Error("כתיבה ללשונית לא מוכרת: " + sid);
-          window.__sheet[title] = rws;
-        },
-        [id, rows]
-      );
-      return json({});
-    }
+    return json({ replies });
   }
   return json({});
 });
