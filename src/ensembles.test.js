@@ -60,6 +60,8 @@ import {
   decodeLedger,
   ledgerToRows,
   rowsToLedger,
+  cost,
+  sheetRoster,
 } from "./ensembles.js";
 
 const poolOf = (cls, teacher = true) => (teacher ? [...ROSTERS[cls], TEACHER] : ROSTERS[cls]);
@@ -2001,4 +2003,120 @@ test("בלי מספר מתאים (נעדרים רבים) מציגים הכול, 
   // שני נוכחים בלבד: אי אפשר לבנות הרכב, אבל הבורר לא נעלם
   const caps = capacity(ROSTERS["ט׳"].slice(0, 5));
   assert.ok(caps.playable.length > 0 || caps.options.length === 0);
+});
+
+/* ============ משיכה מהגיליון אחרי שמירה ============ */
+
+test("משיכה מהגיליון אחרי שמירה לא מאפשרת לשמור את אותו שיעור פעמיים (רגרסיה)", () => {
+  /* קודם כל משיכה איפסה את `base` ואת `saved`. מספיק היה להחליף כיתה
+     ולחזור, והכפתור חזר ל"שמור את השיעור" — ולחיצה ספרה שיעור שני זהה. */
+  const base = { ...EMPTY, lessons: 4 };
+  const st = { ...NO_LESSON, res: { groups: [], load: {}, bench: [] }, saved: true, base };
+  const next = lessonReducer(st, { type: "rebased", lessons: 5 });
+  assert.equal(next.saved, true, "השיעור כבר בגיליון — הוא עדיין שמור");
+  assert.equal(next.base, base, "הבסיס נשמר, ולכן שמירה חוזרת מעדכנת ולא מוסיפה");
+});
+
+test("משיכה שמצאה בגיליון פחות שיעורים מנתקת את השיעור מהבסיס שלו", () => {
+  const st = { ...NO_LESSON, res: { groups: [], load: {}, bench: [] }, saved: true, base: { ...EMPTY, lessons: 4 } };
+  const next = lessonReducer(st, { type: "rebased", lessons: 3 });
+  assert.equal(next.base, null);
+  assert.equal(next.saved, false, "השיעור אינו בגיליון, ולכן צריך לשמור אותו");
+});
+
+/* ============ כולם מנגנים: הניקוד לא מתגמל ספסל ============ */
+
+test("חלוקה בלי יושבים עדיפה תמיד על חלוקה עם יושב, גם כשהפנקס מלא (רגרסיה)", () => {
+  /* קודם כל יושב שצבר הרבה *הוריד* את העלות (‎-plays*3 + 12), ולכן מרגע
+     שהפנקס התמלא נבחרה חלוקה עם ספסל גם כשהייתה אחת בלי. */
+  const ledger = { plays: { a: 40, b: 40 }, pairs: {}, lessons: 20 };
+  const everyone = { groups: [[{ id: "a" }, { id: "b" }]], load: { a: 1, b: 1 }, bench: [] };
+  const benched = { groups: [[{ id: "a" }]], load: { a: 1 }, bench: [{ id: "b" }] };
+  for (let i = 0; i < 50; i++) assert.ok(cost(everyone, ledger) < cost(benched, ledger));
+});
+
+test("כשמישהו חייב לשבת, עדיף שיהיה זה מי שצבר הכי הרבה", () => {
+  const ledger = { plays: { a: 40, b: 2 }, pairs: {}, lessons: 20 };
+  const sitA = { groups: [[{ id: "b" }]], load: { b: 1 }, bench: [{ id: "a" }] };
+  const sitB = { groups: [[{ id: "a" }]], load: { a: 1 }, bench: [{ id: "b" }] };
+  for (let i = 0; i < 50; i++) assert.ok(cost(sitA, ledger) < cost(sitB, ledger));
+});
+
+/* ============ ספסל: רק מי שבאמת לא מנגן ============ */
+
+const mkStudent = (id, inst) => ({ id, name: id, instruments: [inst], roles: [], backup: [] });
+const sitDown = (s) => ({ ...s, playing: s.instruments[0], slot: ROLE_OF[s.instruments[0]] || "melody" });
+
+test("החלפה מול הספסל לא מושיבה נגן שעדיין מנגן בהרכב אחר (רגרסיה)", () => {
+  const [D, D2, B, P, P2, A, T, X] = [
+    mkStudent("D", "תופים"), mkStudent("D2", "תופים"), mkStudent("B", "בס"), mkStudent("P", "פסנתר"),
+    mkStudent("P2", "פסנתר"), mkStudent("A", "אלט"), mkStudent("T", "טנור"), mkStudent("X", "בס"),
+  ];
+  const res = {
+    groups: [[D, B, P, A].map(sitDown), [D2, B, P2, T].map(sitDown)],
+    load: { D: 1, D2: 1, B: 2, P: 1, P2: 1, A: 1, T: 1 },
+    bench: [X],
+  };
+  const out = swapPlayers(res, { g: BENCH, id: "X" }, { g: 0, id: "B" });
+  assert.equal(out.error, undefined);
+  assert.equal(out.load.B, 1);
+  assert.ok(out.groups[1].some((m) => m.id === "B"), "הוא נשאר בהרכב השני");
+  assert.ok(!out.bench.some((s) => s.id === "B"), "ולכן אינו על הספסל");
+});
+
+test("נעדר שישב על הספסל יורד ממנו (רגרסיה)", () => {
+  const res = { groups: [[]], load: {}, bench: [mkStudent("x", "אלט"), mkStudent("y", "טנור")] };
+  assert.deepEqual(removeFromDraw(res, "x").bench.map((s) => s.id), ["y"]);
+});
+
+/* ============ מעבר יום ============ */
+
+test("יום חדש מאפס שיעור שנשאר פתוח מיום קודם (רגרסיה)", () => {
+  /* האפליקציה נשארת פתוחה בטלפון משבוע לשבוע. עריכה ושמירה של חלוקה
+     ישנה היו נכתבות על `base` הישן — כלומר דורסות את השיעור הקודם. */
+  const st = { ...NO_LESSON, cls: "ט׳", res: { groups: [], load: {}, bench: [] }, day: "2026-11-03", base: EMPTY, saved: true };
+  const next = lessonReducer(st, { type: "tick", day: "2026-11-10" });
+  assert.equal(next.res, null);
+  assert.equal(next.base, null);
+  assert.equal(next.cls, "ט׳");
+});
+
+test("באותו יום tick לא משנה דבר", () => {
+  const st = { ...NO_LESSON, res: { groups: [], load: {}, bench: [] }, day: "2026-11-10" };
+  assert.equal(lessonReducer(st, { type: "tick", day: "2026-11-10" }), st);
+  assert.equal(lessonReducer(NO_LESSON, { type: "tick", day: "2026-11-10" }), NO_LESSON);
+});
+
+test("גיבוי פגום נדחה ולא נטען כפנקס (רגרסיה)", () => {
+  const roster = ROSTERS["ט׳"];
+  const bad = (o) => () => decodeLedger("ט׳", roster, JSON.stringify({ c: "ט׳", ...o }));
+  assert.throws(bad({ l: "abc", p: [], s: [] }), /שיעורים/);
+  assert.throws(bad({ l: -1, p: [], s: [] }), /שיעורים/);
+  assert.throws(bad({ l: 3, p: "12", s: [] }));
+  assert.throws(() => decodeLedger("ט׳", roster, "null"));
+  const ok = decodeLedger("ט׳", roster, encodeLedger("ט׳", roster, { plays: { [roster[0].id]: 3 }, pairs: {}, lessons: 2 }));
+  assert.equal(ok.ledger.lessons, 2);
+  assert.equal(ok.ledger.plays[roster[0].id], 3);
+});
+
+/* ============ רשימה שנקראת מהגיליון ============ */
+
+test("רשימה מהגיליון עם מזהה כפול נדחית במקום להפיל את האפליקציה (רגרסיה)", () => {
+  /* שורה שהועתקה ביד בגיליון נושאת את המזהה של המקור. קודם הרשימה נשמרה
+     למטמון לפני כל בדיקה, buildRoster זרק ברנדר — וכל רענון קרס שוב. */
+  const rows = [
+    [],
+    ["אבי", "כהן", "אלט", "", "אבי-כהן"],
+    ["גלי", "לוי", "בס", "", "אבי-כהן"],
+  ];
+  const out = sheetRoster(rows);
+  assert.equal(out.ok, false);
+  assert.ok(out.problems.some((m) => m.includes("כפול")));
+});
+
+test("רשימה תקינה מהגיליון מתקבלת, ושורה בלי מזהה מקבלת אחד", () => {
+  const out = sheetRoster([[], ["אבי", "כהן", "אלט", "", "אבי-כהן"], ["גלי", "לוי", "בס", "", ""]]);
+  assert.equal(out.ok, true);
+  assert.deepEqual(out.list.map((r) => r[3]), ["אבי-כהן", "גלי-לוי"]);
+  assert.equal(sheetRoster([[]]).ok, false, "לשונית ריקה אינה רשימה");
 });

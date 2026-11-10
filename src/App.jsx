@@ -442,7 +442,7 @@ export default function App() {
         const localRoster = buildRoster(list);
         const next = rowsToLedger(localRoster, rows);
         setLedger(next);
-        dispatch({ type: "rebased" });
+        dispatch({ type: "rebased", lessons: next.lessons });
         try {
           const log = rowsToAtt(await Sheets.readRows(ATT_TAB(cls), 5));
           if (!alive()) return;

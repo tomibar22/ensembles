@@ -92,6 +92,9 @@ const ROLE_LABEL = {
 const MIN_GROUP = REQUIRED.length;
 const MAX_GROUP = 7; // מעבר לזה כבר לא באמת מנגנים יחד, רק יושבים
 const MAX_GROUPS = 5; // יותר מזה לא מנוהל בשיעור אחד
+/* מחיר של תלמיד שיושב בחוץ, בניקוד החלוקה. גדול מכל מה שהפנקס יכול
+   לצבור, כדי ששום שיקול אחר לא יצדיק ספסל שאפשר היה להימנע ממנו. */
+const BENCH_COST = 1e6;
 const TEACHER = {
   id: "__teacher",
   name: "תומר",
@@ -268,6 +271,24 @@ function rosterProblems(list) {
       out.push(`אין בכיתה אף ${ROLE_LABEL[r]} — אי אפשר יהיה לחלק`)
     );
   return out;
+}
+
+/**
+ * הרשימה כפי שנקראה מהגיליון, אחרי בדיקה: `{ list, problems, ok }`.
+ *
+ * הגיליון נערך גם ביד, ושורה שהועתקה נושאת את המזהה של המקור. `ok` אומר
+ * אם אפשר לבנות מהרשימה כיתה בכלל — רשימה שאינה `ok` אסור לשמור במטמון:
+ * buildRoster זורק עליה ברנדר, וכך כל רענון של הדף קרס מחדש.
+ */
+function sheetRoster(rows) {
+  const list = assignIds(rowsToRoster(rows));
+  let ok = list.length > 0;
+  try {
+    buildRoster(list);
+  } catch {
+    ok = false;
+  }
+  return { list, problems: rosterProblems(list), ok };
 }
 
 /* שמות תצוגה קודמים של תלמידים ששמם שונה. משמש רק כשקוראים גיליון
@@ -476,9 +497,11 @@ function cost(res, ledger) {
   Object.entries(res.load).forEach(([id, n]) => {
     if (n > 1) fairness += (ledger.plays[id] || 0) * 3; // כפל הרכבים למי שכבר צבר הרבה
   });
+  /* כולם מנגנים: יושב אחד יקר יותר מכל דבר אחר. קודם הוא עלה 12 וזיכה
+     ב-plays*3, ולכן מרגע שהפנקס התמלא חלוקה עם ספסל ניצחה חלוקה בלי.
+     הזיכוי נשאר רק כשובר שוויון: אם מישהו חייב לשבת — מי שצבר הכי הרבה. */
   res.bench.forEach((s) => {
-    fairness -= (ledger.plays[s.id] || 0) * 3; // מי שצבר הרבה — סביר שיֵשב
-    fairness += 12;
+    fairness += BENCH_COST - (ledger.plays[s.id] || 0) * 3;
   });
   let variety = 0;
   res.groups.forEach((g) =>
@@ -623,7 +646,8 @@ function removeFromDraw(res, id) {
     const missing = missingRoles(g);
     if (missing.length) broken.push({ group: i, missing });
   });
-  return { groups, load, bench: res.bench, broken };
+  // גם מהספסל: מי שאינו כאן לא "יושב בחוץ", ואסור שיוצע להחלפה
+  return { groups, load, bench: res.bench.filter((s) => s.id !== id), broken };
 }
 
 /**
@@ -743,7 +767,9 @@ function swapPlayers(res, a, b) {
     load[into.id] = (load[into.id] || 0) + 1;
     load[out.id] = (load[out.id] || 0) - 1;
     if (!load[out.id]) delete load[out.id];
-    bench = res.bench.filter((s) => s.id !== into.id).concat([out]);
+    // מי שעדיין מנגן בהרכב אחר רק מפנה כיסא — הוא לא עולה לספסל
+    bench = res.bench.filter((s) => s.id !== into.id);
+    if (!load[out.id]) bench = bench.concat([out]);
   };
   if (a.g === BENCH) toBench(A, B);
   if (b.g === BENCH) toBench(B, A);
@@ -1058,7 +1084,11 @@ function encodeLedger(cls, roster, ledger) {
     מה קרה במקום לשנות לו את ההיסטוריה בשקט */
 function decodeLedger(cls, roster, text) {
   const o = JSON.parse(text);
+  if (!o || typeof o !== "object") throw new Error("זה לא גיבוי של פנקס");
   if (o.c !== cls) throw new Error("הפנקס שייך לכיתה " + o.c);
+  // טקסט שהודבק ביד: בלי הבדיקות האלה "abc" היה נטען כמספר השיעורים
+  if (!Number.isInteger(o.l) || o.l < 0) throw new Error("מספר השיעורים בגיבוי אינו תקין");
+  if (!Array.isArray(o.p) || typeof (o.x ?? "") !== "string") throw new Error("מבנה הגיבוי אינו תקין");
   const list = roster;
   const known = new Set(list.map((s) => s.id));
   // גיבוי ישן (v1) לא נשא מזהים — נקרא לפי סדר הרשימה הנוכחית, כמו קודם
@@ -1078,7 +1108,7 @@ function decodeLedger(cls, roster, text) {
       if (ids[a] && ids[b]) pairs[pairKey(ids[a], ids[b])] = Number(n);
     });
   return {
-    ledger: { plays, pairs, lessons: o.l || 0 },
+    ledger: { plays, pairs, lessons: o.l },
     dropped: ids.filter((id) => !id).length,
     added: list.filter((s) => !(s.id in plays)).length,
   };
@@ -1359,9 +1389,23 @@ function lessonReducer(st, a) {
       return { ...st, saved: true, base: a.base };
     case "undone":
       return { ...st, saved: false, base: null };
-    // הפנקס נמשך מהגיליון: השיעור שבזיכרון כבר לא יושב על אותו בסיס
-    case "rebased":
-      return { ...st, base: null, saved: false };
+    /* הפנקס נמשך מהגיליון. אם השיעור של היום הוא האחרון שם — בדיוק שיעור
+       אחד מעל `base` — דבר לא השתנה, והשיעור נשאר שמור על אותו בסיס.
+       קודם כל משיכה איפסה את שניהם: מספיק היה להחליף כיתה ולחזור, והכפתור
+       חזר ל"שמור את השיעור" וספר את אותו שיעור פעמיים.
+       כשהגיליון מחזיק מספר אחר, הבסיס כבר אינו נכון. פחות שיעורים — השיעור
+       אינו שם וצריך לשמור אותו; יותר — הוא שם, ומישהו שמר אחריו. */
+    case "rebased": {
+      if (!st.base) return st;
+      const mine = st.base.lessons + 1;
+      if (a.lessons === mine) return st;
+      return { ...st, base: null, saved: a.lessons > mine ? st.saved : false };
+    }
+    /* היום התחלף בזמן שהאפליקציה נשארה פתוחה. חלוקה של יום אחר אינה
+       השיעור של היום: עריכה ושמירה שלה היו נכתבות על ה-`base` הישן,
+       כלומר דורסות את השיעור הקודם במקום להוסיף אחד. */
+    case "tick":
+      return st.day && st.day !== a.day ? { ...NO_LESSON, cls: st.cls } : st;
     default:
       return st;
   }
@@ -1442,6 +1486,7 @@ export {
   makeId,
   assignIds,
   rosterProblems,
+  sheetRoster,
   CLASSES,
   KEYS,
   TABS,
