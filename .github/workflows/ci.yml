@@ -21,7 +21,8 @@ jobs:
         with:
           # node 20 לא תומך בתבניות glob ב---test, ושם הבדיקות נפלו
           node-version: 22
-      - run: npm install
+          cache: npm
+      - run: npm ci
       - run: npm run lint
       - run: npm test
       - run: npm run build
