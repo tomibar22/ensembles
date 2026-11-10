@@ -923,6 +923,16 @@ function changeInstrument(res, at, inst) {
   };
 }
 
+/** החלוקה כטקסט פשוט — לשליחה לכיתה או להדבקה במקום אחר */
+function drawText(res, title) {
+  const lines = [title];
+  res.groups.forEach((g, i) => {
+    lines.push("", `הרכב ${i + 1}`, ...g.map((m) => `${m.name} — ${m.playing}`));
+  });
+  if (res.bench.length) lines.push("", `יושבים: ${res.bench.map((s) => s.name).join(", ")}`);
+  return lines.join("\n");
+}
+
 /* ============================ יומן נוכחות ============================ */
 
 const ATT_LABEL = { present: "נוכח", late: "איחור", absent: "חיסור", left: "יצא" };
@@ -1385,6 +1395,14 @@ function lessonReducer(st, a) {
       return { ...st, sel: a.sel, adding: null, msg: a.sel ? "" : st.msg };
     case "adding":
       return { ...st, adding: a.g, sel: null, msg: "" };
+    /* מי שסומן חסר בטעות לפני החלוקה ותוקן אחריה נרשם כמאחר. זו הדרך
+       לומר "הוא היה כאן מההתחלה" — בלי לפתוח את הגיליון ולמחוק שורה. */
+    case "onTime": {
+      if (!st.atDraw || !st.atDraw.has(a.id)) return st;
+      const atDraw = new Set(st.atDraw);
+      atDraw.delete(a.id);
+      return { ...st, atDraw, saved: false };
+    }
     case "saved":
       return { ...st, saved: true, base: a.base };
     case "undone":
@@ -1526,6 +1544,7 @@ export {
   addPlayer,
   removePlayer,
   changeInstrument,
+  drawText,
   BENCH,
   buildRoster,
   forRole,

@@ -62,6 +62,7 @@ import {
   rowsToLedger,
   cost,
   sheetRoster,
+  drawText,
 } from "./ensembles.js";
 
 const poolOf = (cls, teacher = true) => (teacher ? [...ROSTERS[cls], TEACHER] : ROSTERS[cls]);
@@ -2119,4 +2120,27 @@ test("רשימה תקינה מהגיליון מתקבלת, ושורה בלי מ�
   assert.equal(out.ok, true);
   assert.deepEqual(out.list.map((r) => r[3]), ["אבי-כהן", "גלי-לוי"]);
   assert.equal(sheetRoster([[]]).ok, false, "לשונית ריקה אינה רשימה");
+});
+
+/* ============ תיקון איחור, ושיתוף החלוקה ============ */
+
+test("onTime מוציא תלמיד מתמונת הנוכחות של החלוקה, והוא כבר לא נרשם כמאחר", () => {
+  const roster = ROSTERS["ט׳"];
+  const [a, b] = roster;
+  let st = { ...NO_LESSON, res: { groups: [], load: {}, bench: [] }, atDraw: new Set([a.id, b.id]), saved: true };
+  st = lessonReducer(st, { type: "onTime", id: a.id });
+  assert.equal(st.saved, false, "היומן השתנה, ולכן צריך לשמור שוב");
+  // שניהם סומנו חסרים בחלוקה וחזרו; רק מי שלא תוקן נשאר מאחר
+  const log = lessonAttendance(roster, st.atDraw, new Set(), 1, "2026-11-10");
+  assert.deepEqual(log.map((e) => [e.id, e.status]), [[b.id, "late"]]);
+  assert.equal(lessonReducer(st, { type: "onTime", id: "מישהו-אחר" }), st);
+});
+
+test("drawText מפרט כל הרכב עם הכלים, ואת היושבים", () => {
+  const res = {
+    groups: [[{ name: "א", playing: "תופים" }, { name: "ב", playing: "בס" }], [{ name: "ג", playing: "אלט" }]],
+    bench: [{ name: "ד" }],
+  };
+  assert.equal(drawText(res, "כיתה ט׳"), "כיתה ט׳\n\nהרכב 1\nא — תופים\nב — בס\n\nהרכב 2\nג — אלט\n\nיושבים: ד");
+  assert.ok(!drawText({ ...res, bench: [] }, "x").includes("יושבים"));
 });

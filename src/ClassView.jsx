@@ -41,6 +41,7 @@ import {
   capacity,
   emptyRoles,
   renameInAtt,
+  drawText,
 } from "./ensembles.js";
 
 const WIDE = { maxWidth: 760, margin: "0 auto" };
@@ -442,7 +443,17 @@ export default function ClassView({ cls }) {
 
         {res && <Groups res={res} sel={sel} chipState={chipState} onPick={pickChip} adding={adding} canUndo={!!undo} edit={edit} />}
 
-        {res && <SaveBar saved={saved} hasBase={!!lessonBase} onSave={save} onUndoSave={undoSave} />}
+        {res && (
+          <SaveBar
+            saved={saved}
+            hasBase={!!lessonBase}
+            entries={entries}
+            shareText={drawText(res, `הרכבים · כיתה ${cls} · ${new Date().toLocaleDateString("he-IL")}`)}
+            onOnTime={(id) => dispatch({ type: "onTime", id })}
+            onSave={save}
+            onUndoSave={undoSave}
+          />
+        )}
 
         {panelOpen === "track" && (
           <TrackPanel
