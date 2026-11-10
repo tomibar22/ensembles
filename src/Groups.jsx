@@ -98,7 +98,7 @@ export default function Groups({ res, sel, chipState, onPick, adding, canUndo, e
                       height: 28,
                       borderRadius: 999,
                       background: C.brass,
-                      color: "#241B08",
+                      color: C.onBrass,
                       fontSize: 16,
                       fontWeight: 700,
                     }}

@@ -165,7 +165,7 @@ export default function RosterEditor({ cls, list, onSave, onCancel, busy }) {
         <button
           onClick={save}
           disabled={busy || !!problems.length || !dirty}
-          style={btn(problems.length || !dirty ? C.soft : C.brass, problems.length || !dirty ? C.dim : "#241B08")}
+          style={btn(problems.length || !dirty ? C.soft : C.brass, problems.length || !dirty ? C.dim : C.onBrass)}
         >
           {busy ? "שומר…" : "שמור את הרשימה"}
         </button>

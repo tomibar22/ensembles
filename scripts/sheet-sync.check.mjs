@@ -11,6 +11,7 @@
  *   npm i --no-save playwright && node scripts/sheet-sync.check.mjs
  */
 import { chromium } from "playwright";
+import { SEED } from "../src/ensembles.js";
 
 /* גיליון מזויף בזיכרון: מאפשר לבדוק את מסלול הסנכרון בלי OAuth אמיתי. */
 const SHEET_INIT = `
@@ -39,6 +40,13 @@ const check = (ok, msg) => {
 const b = await chromium.launch(EXE ? { executablePath: EXE } : {});
 const p = await b.newPage({ viewport: { width: 390, height: 900 } });
 await p.addInitScript(SHEET_INIT);
+
+/* רשימות הכיתה במטמון, כמו במכשיר שכבר עבד. רק רשימה אמיתית שבמכשיר
+   עולה לגיליון — הזרע שבקוד לא — ולכן בלעדיהן אין מה לבדוק. */
+await p.addInitScript((seed) => {
+  for (const [key, list] of Object.entries(seed))
+    if (!localStorage.getItem(key)) localStorage.setItem(key, JSON.stringify(list));
+}, { "ens-roster-g9": SEED["ט׳"], "ens-roster-g11": SEED["י״א"] });
 
 /* הספרייה האמיתית של גוגל נטענת מ-index.html ודורסת את window.google
    המזויף — ואז שום דבר לא מתחבר וכל הבדיקות נכשלות בלי קשר לקוד. */
@@ -206,6 +214,47 @@ check(again.length === 3, `העדכון החליף את שורות השיעור 
 check(cell2("מאיה", 4) === "יצא", `מאיה נרשמה כיצאה באמצע (בפועל: ${cell2("מאיה", 4) || "לא נרשמה"})`);
 check(cell2(LATE, 4) === "איחור", "האיחור נשמר גם אחרי העדכון");
 check(new Set(again.map((r) => r[1])).size === 1, "כל השורות שייכות לאותו מספר שיעור");
+
+/* ============ שיעור שנשמר אינו נספר פעמיים ============
+
+   אחרי שמירה מוצלחת, החלפת כיתה וחזרה מושכת שוב מהגיליון. קודם המשיכה
+   הזאת איפסה את "נשמר" ואת הבסיס, הכפתור חזר ל"שמור את השיעור" — ולחיצה
+   עליו ספרה את אותו שיעור כשיעור שני. */
+const lessonsBefore = Number((((await p.evaluate(() => window.__sheet))["g9"] || [])[0] || [])[1] || 0);
+await p.getByRole("button", { name: "י״א", exact: true }).click();
+await p.waitForTimeout(1500);
+await p.getByRole("button", { name: "ט׳", exact: true }).click();
+await p.waitForTimeout(1800);
+check(
+  (await p.getByRole("button", { name: "נשמר בפנקס" }).count()) === 1 &&
+    (await p.getByRole("button", { name: /שמור את השיעור/ }).count()) === 0,
+  "אחרי החלפת כיתה וחזרה השיעור עדיין מסומן כשמור"
+);
+/* ועריכה נוספת ושמירה מעדכנות את אותו שיעור */
+await p.getByRole("button", { name: "שנה נוכחות" }).click();
+await p.waitForTimeout(200);
+await p.getByRole("button", { name: "מאיה", exact: true }).click();
+await p.waitForTimeout(400);
+await p.getByRole("button", { name: /עדכן את השיעור/ }).click();
+await p.waitForTimeout(1200);
+const lessonsAfter = Number((((await p.evaluate(() => window.__sheet))["g9"] || [])[0] || [])[1] || 0);
+check(lessonsAfter === lessonsBefore, `שמירה חוזרת עדכנה את השיעור ולא הוסיפה אחד (${lessonsBefore} → ${lessonsAfter})`);
+
+/* ============ רשימה פגומה בגיליון ============
+
+   שורה שהועתקה ביד בגיליון נושאת את המזהה של המקור. קודם הרשימה נשמרה
+   למטמון לפני כל בדיקה, והאפליקציה קרסה בכל רענון. */
+await p.evaluate(() => {
+  const rows = window.__sheet["תלמידים ט׳"];
+  rows.push([...rows[1]]);
+});
+await p.getByRole("button", { name: /גיליון/ }).first().click();
+await p.waitForTimeout(1500);
+const text = await p.locator("body").innerText();
+check(text.includes("לא תקינה") && !text.includes("משהו נשבר"), "רשימה עם מזהה כפול נדחית בהודעה, והאפליקציה ממשיכה לעבוד");
+await p.reload({ waitUntil: "domcontentloaded" });
+await p.waitForTimeout(700);
+check(!(await p.locator("body").innerText()).includes("משהו נשבר"), "וגם אחרי רענון היא עולה");
 
 await b.close();
 console.log(failures ? `\n${failures} בדיקות נכשלו` : "\nהכול עבר");

@@ -45,7 +45,7 @@ export default function AttendanceBoard({
           </button>
           <button
             onClick={onDraw}
-            style={{ ...btn(C.teal, "#0C2320"), padding: "9px 15px", fontSize: 15, marginRight: "auto" }}
+            style={{ ...btn(C.teal, C.onTeal), padding: "9px 15px", fontSize: 15, marginRight: "auto" }}
           >
             חלק מחדש
           </button>
@@ -146,7 +146,7 @@ export default function AttendanceBoard({
       >
         <button
           onClick={onDraw}
-          style={{ ...btn(C.teal, "#0C2320"), minHeight: 48, boxShadow: "0 6px 20px rgba(0,0,0,0.45)" }}
+          style={{ ...btn(C.teal, C.onTeal), minHeight: 48, boxShadow: "0 6px 20px rgba(0,0,0,0.45)" }}
         >
           {hasDraw ? "חלק מחדש" : `חלק את ${present.length} הנוכחים ל-${k} הרכבים`}
         </button>

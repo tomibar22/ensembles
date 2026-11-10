@@ -12,18 +12,22 @@
  *   npm i --no-save playwright && node scripts/sync-expiry.check.mjs
  */
 import { chromium } from "playwright";
+import { SEED } from "../src/ensembles.js";
 
 const SHEET_INIT = `
   window.__sheet = {};
   window.__ids = {};
   window.__nextId = 1;
   window.__expiresIn = 3600;           // נשלט מהבדיקה
+  window.__deny = false;               // true = חלון ההתחברות נסגר בלי טוקן
   window.google = {
     accounts: {
       oauth2: {
         initTokenClient: (cfg) => ({
           requestAccessToken: () =>
-            cfg.callback({ access_token: "fake", expires_in: window.__expiresIn }),
+            window.__deny
+              ? cfg.error_callback({ type: "popup_closed" })
+              : cfg.callback({ access_token: "fake", expires_in: window.__expiresIn }),
         }),
       },
     },
@@ -40,6 +44,13 @@ const check = (ok, msg) => {
 const b = await chromium.launch(EXE ? { executablePath: EXE } : {});
 const p = await b.newPage({ viewport: { width: 390, height: 900 } });
 await p.addInitScript(SHEET_INIT);
+
+/* רשימות הכיתה במטמון, כמו במכשיר שכבר עבד. רק רשימה אמיתית שבמכשיר
+   עולה לגיליון — הזרע שבקוד לא — ולכן בלעדיהן אין מה לבדוק. */
+await p.addInitScript((seed) => {
+  for (const [key, list] of Object.entries(seed))
+    if (!localStorage.getItem(key)) localStorage.setItem(key, JSON.stringify(list));
+}, { "ens-roster-g9": SEED["ט׳"], "ens-roster-g11": SEED["י״א"] });
 
 /* הספרייה האמיתית של גוגל נטענת מ-index.html ודורסת את window.google
    המזויף — ואז שום דבר לא מתחבר וכל הבדיקות נכשלות בלי קשר לקוד. */
@@ -119,8 +130,10 @@ await saveLesson();
 const g11 = await lessonsIn("g11");
 check(g11 === 1, `השיעור של י״א נכתב לגיליון בזמן שהחיבור חי (שיעורים=${g11})`);
 
-/* וכאן פג הטוקן, כמו שעה אחרי תחילת יום ההוראה */
+/* וכאן פג הטוקן, כמו שעה אחרי תחילת יום ההוראה. השמירה מנסה להתחבר
+   מחדש בעצמה — וכאן החלון נסגר בלי טוקן, כמו בטלפון שחסם אותו. */
 await p.waitForTimeout(4000);
+await p.evaluate(() => (window.__deny = true));
 await p.getByRole("button", { name: "ט׳", exact: true }).click();
 await p.waitForTimeout(1200);
 
@@ -149,7 +162,7 @@ if (hasEditor) {
 }
 
 /* מתחברים מחדש — הרגע שבו הבאג מחק את מה שנשמר במכשיר */
-await p.evaluate(() => (window.__expiresIn = 3600));
+await p.evaluate(() => ((window.__expiresIn = 3600), (window.__deny = false)));
 await p.getByRole("button", { name: /גיליון|ממתין/ }).first().click();
 await p.waitForTimeout(2500);
 
@@ -189,6 +202,23 @@ check(!/ממתין/.test(btnEnd), `אחרי ההעלאה הסימון נעלם (
 /* והכיוון ההפוך עדיין עובד: גיליון מעודכן אינו נדרס על ידי מכשיר מפגר */
 const g11End = await lessonsIn("g11");
 check(g11End === 1, `הפנקס של י״א נשאר בגיליון כפי שהיה (שיעורים=${g11End})`);
+
+/* ============ שמירה שמתחברת לבד ============
+
+   הדף נטען מחדש — הטוקן חי בזיכרון בלבד ולכן אבד — והמורה מחלק ושומר
+   בלי ללחוץ קודם על "גיליון". במכשיר שכבר התחבר פעם, הלחיצה על "שמור"
+   מבקשת טוקן בעצמה, והשיעור מגיע לגיליון. */
+await p.reload({ waitUntil: "domcontentloaded" });
+await p.waitForTimeout(600);
+const before = await lessonsIn("g11");
+await p.getByRole("button", { name: /חלק מחדש|חלק את/ }).first().click();
+await p.waitForTimeout(900);
+await p.getByRole("button", { name: /שמור את השיעור|עדכן את השיעור/ }).click();
+await p.waitForTimeout(1500);
+const afterAuto = await lessonsIn("g11");
+const btnAuto = (await p.getByRole("button", { name: /גיליון|ממתין/ }).first().textContent()) || "";
+check(afterAuto >= before && (await p.locator("body").innerText()).includes("נשמר בגיליון"), `שמירה בלי חיבור התחברה לבד וכתבה לגיליון (שיעורים=${afterAuto})`);
+check(/●/.test(btnAuto), `והכפתור מראה חיבור חי (בכפתור: "${btnAuto.trim()}")`);
 
 await b.close();
 console.log(failures ? `\n${failures} בדיקות נכשלו` : "\nהכול עבר");

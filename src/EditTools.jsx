@@ -16,7 +16,7 @@ function Pill({ ok = true, on = false, danger = false, onClick, children }) {
         padding: "0 14px",
         borderRadius: 999,
         fontSize: 15,
-        color: on ? "#241B08" : danger ? C.rose : C.ink,
+        color: on ? C.onBrass : danger ? C.rose : C.ink,
         background: on ? C.brass : "transparent",
         border: `1px solid ${on ? C.brass : danger ? C.rose + "88" : C.line}`,
         opacity: ok || on ? 1 : 0.35,
