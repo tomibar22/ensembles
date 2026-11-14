@@ -723,3 +723,16 @@ hr.rule {
   padding: 4px 10px;
   font-weight: 600;
 }
+
+/* ---- סמלים ---- */
+.ic {
+  flex: none;
+  vertical-align: -0.2em;
+}
+.tag .ic {
+  vertical-align: -0.15em;
+  margin-inline-end: 3px;
+}
+.tabbar button .ic {
+  margin-bottom: 1px;
+}

@@ -1,3 +1,4 @@
+import { Icon } from "./Icon";
 import { useEffect, type ReactNode } from "react";
 
 /** גיליון תחתון — לעריכה ולפעולות, נוח לאגודל */
@@ -113,7 +114,7 @@ export function TopBar({ title, back, children }: { title: ReactNode; back?: () 
     <header className="top">
       {back && (
         <button className="btn icon ghost" onClick={back} aria-label="חזרה">
-          ›
+          <Icon name="back" size={22} />
         </button>
       )}
       <h1>{title}</h1>

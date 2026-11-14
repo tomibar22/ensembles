@@ -1,3 +1,4 @@
+import { Icon } from "../components/Icon";
 import { useMemo, useRef, useState } from "react";
 import { Confirm, Field, Sheet } from "../components/ui";
 import { ensureLesson, markDocDirty } from "../data/actions";
@@ -32,13 +33,13 @@ export default function MediaSection({ ctx, date }: { ctx: ProjectCtx; date: str
         <div className="list" style={{ marginBottom: 10 }}>
           {list.map((m) => (
             <div key={m.id} className="list-row">
-              <span aria-hidden>{m.kind === "video" ? "🎬" : "📎"}</span>
+              <Icon name={m.kind === "video" ? "video" : "clip"} />
               <a className="grow" href={m.url} target="_blank" rel="noreferrer">
                 <span dir="auto">{m.title || m.filename}</span>
                 {m.item_id && bank.get(m.item_id) && <span className="sub"> · {bank.get(m.item_id)!.title}</span>}
               </a>
               <button className="btn quiet sm" aria-label={`הסר את ${m.title}`} onClick={() => setRemoving(m)}>
-                ✕
+                <Icon name="x" size={18} />
               </button>
             </div>
           ))}
@@ -56,10 +57,10 @@ export default function MediaSection({ ctx, date }: { ctx: ProjectCtx; date: str
       />
       <div className="row">
         <button className="btn accent grow" onClick={() => input.current?.click()}>
-          ⬆ העלה סרטון
+          <Icon name="upload" /> העלה סרטון
         </button>
         <button className="btn" onClick={() => setLinking(true)}>
-          קישור קיים
+          <Icon name="link" size={18} /> קישור קיים
         </button>
       </div>
       {file && <UploadSheet ctx={ctx} date={date} file={file} onClose={() => setFile(null)} />}

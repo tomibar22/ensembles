@@ -1,3 +1,4 @@
+import { Icon } from "../components/Icon";
 import { useMemo } from "react";
 import { go, type ProjectCtx } from "../data/hooks";
 import { useTables } from "../data/store";
@@ -53,8 +54,8 @@ export default function HistoryTab({ ctx, today }: { ctx: ProjectCtx; today: str
             <div className="row" style={{ marginTop: 6, gap: 6 }}>
               {absent > 0 && <span className="tag warn">{absent} חיסורים</span>}
               {late > 0 && <span className="tag">{late} איחורים</span>}
-              {hasDraw && <span className="tag sky">♫ הרכבים</span>}
-              {media > 0 && <span className="tag sky">🎬 {media}</span>}
+              {hasDraw && <span className="tag sky"><Icon name="notes" size={13} />הרכבים</span>}
+              {media > 0 && <span className="tag sky"><Icon name="video" size={13} />{media}</span>}
             </div>
           </button>
         );

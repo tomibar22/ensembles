@@ -1,3 +1,4 @@
+import { Icon } from "./Icon";
 import { useMemo, useState } from "react";
 import { addLessonItem, removeLessonItem } from "../data/actions";
 import type { ProjectCtx } from "../data/hooks";
@@ -69,7 +70,7 @@ export default function SmartField({ ctx, date, kind }: { ctx: ProjectCtx; date:
               onClick={() => removeLessonItem(link.id, ctx.project.id)}
               aria-label={`הסר את ${item.title}`}
             >
-              <span dir="auto">{item.title}</span> <span aria-hidden>✕</span>
+              <span dir="auto">{item.title}</span> <Icon name="x" size={15} />
             </button>
           ))}
         </div>
@@ -99,7 +100,7 @@ export default function SmartField({ ctx, date, kind }: { ctx: ProjectCtx; date:
           ))}
           {q.trim() && !exact && (
             <button className="chip sm" onMouseDown={(e) => e.preventDefault()} onClick={() => add({ title: q })}>
-              ＋ חדש: “{q.trim()}”
+              <Icon name="plus" size={16} /> חדש: “{q.trim()}”
             </button>
           )}
         </div>

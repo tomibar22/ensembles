@@ -1,3 +1,4 @@
+import { Icon } from "../components/Icon";
 import { useMemo, useState } from "react";
 import { Confirm, Field, Seg, Sheet, TopBar } from "../components/ui";
 import { mergeBankItems, renameBankItem } from "../data/actions";
@@ -207,7 +208,7 @@ function ItemSheet({ item, uses, onClose }: { item: BankItem; uses: Use[]; onClo
               <button key={i} className="list-row" style={{ minHeight: 44 }} onClick={() => go("p", u.projectId, "lesson", u.date)}>
                 <b style={{ minWidth: 70 }}>{shortDate(u.date)}</b>
                 <span className="grow">{projects.get(u.projectId)?.name}</span>
-                <span className="muted">‹</span>
+                <span className="muted"><Icon name="forward" size={18} /></span>
               </button>
             ))}
           </div>
@@ -219,7 +220,7 @@ function ItemSheet({ item, uses, onClose }: { item: BankItem; uses: Use[]; onClo
             <div className="list">
               {media.map((m) => (
                 <a key={m.id} className="list-row" style={{ minHeight: 44 }} href={m.url} target="_blank" rel="noreferrer">
-                  🎬 <span className="grow">{m.title}</span>
+                  <Icon name="video" /> <span className="grow">{m.title}</span>
                   <span className="sub">{projects.get(m.project_id)?.name}</span>
                 </a>
               ))}

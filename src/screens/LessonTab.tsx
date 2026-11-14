@@ -1,3 +1,4 @@
+import { Icon } from "../components/Icon";
 import { useEffect, useMemo, useRef, useState } from "react";
 import SmartField from "../components/SmartField";
 import { Confirm, Seg } from "../components/ui";
@@ -154,7 +155,7 @@ export default function LessonTab({ ctx, date, docErr }: { ctx: ProjectCtx; date
             <div className="row" style={{ marginTop: 12 }}>
               {ctx.features.ensembles && (
                 <button className="btn primary grow" onClick={() => go("p", ctx.project.id, "ensembles", date)}>
-                  {eng.draw ? "להרכבים ♫" : "לחלוקה להרכבים ♫"}
+                  <Icon name="notes" /> {eng.draw ? "להרכבים" : "לחלוקה להרכבים"}
                 </button>
               )}
               {counts.absent + counts.late > 0 && (
@@ -295,7 +296,7 @@ function PrevLesson({ ctx, lessonId, date, description }: { ctx: ProjectCtx; les
         <b>בשיעור הקודם</b>
         <span className="sub">{shortDate(date)}</span>
         {!open && hw && <span className="sub grow" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>· ש.ב.: {hw.titles.join(", ")}</span>}
-        <span className="end muted">{open ? "▲" : "▼"}</span>
+        <span className="end muted"><Icon name={open ? "up" : "down"} size={18} /></span>
       </button>
       {open && (
         <div className="stack tight" style={{ marginTop: 8 }}>

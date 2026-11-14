@@ -1,3 +1,4 @@
+import { Icon } from "../components/Icon";
 import { useMemo, useState } from "react";
 import { Seg, Sheet } from "../components/ui";
 import { writeMark } from "../data/actions";
@@ -180,7 +181,7 @@ function Detail({ ctx, participantId, row, onClose }: { ctx: ProjectCtx; partici
                     aria-pressed={m.justified}
                     onClick={() => writeMark(ctx.project.id, date, participantId, { justified: !m.justified })}
                   >
-                    {m.justified ? "✓ מוצדק" : "סמן כמוצדק"}
+                    {m.justified && <Icon name="check" size={16} />} {m.justified ? "מוצדק" : "סמן כמוצדק"}
                   </button>
                 )}
                 <button
@@ -188,7 +189,7 @@ function Detail({ ctx, participantId, row, onClose }: { ctx: ProjectCtx; partici
                   aria-label="מחק את הרישום"
                   onClick={() => writeMark(ctx.project.id, date, participantId, { status: null, no_homework: false })}
                 >
-                  ✕
+                  <Icon name="x" size={18} />
                 </button>
               </div>
             );

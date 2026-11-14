@@ -1,3 +1,4 @@
+import { Icon } from "../components/Icon";
 import { useEffect, useState } from "react";
 import { TopBar } from "../components/ui";
 import { connected, syncDoc } from "../data/google";
@@ -12,11 +13,11 @@ import PeopleTab from "./PeopleTab";
 import SetupTab from "./SetupTab";
 
 const TABS: [string, string, string][] = [
-  ["lesson", "שיעור", "✎"],
-  ["ensembles", "הרכבים", "♫"],
-  ["track", "מעקב", "☰"],
-  ["history", "יומן", "❏"],
-  ["people", "משתתפים", "☺"],
+  ["lesson", "שיעור", "pencil"],
+  ["ensembles", "הרכבים", "notes"],
+  ["track", "מעקב", "track"],
+  ["history", "יומן", "journal"],
+  ["people", "משתתפים", "people"],
 ];
 
 export default function ProjectScreen({ projectId, tab = "lesson", date }: { projectId: string; tab?: string; date?: string }) {
@@ -67,7 +68,7 @@ export default function ProjectScreen({ projectId, tab = "lesson", date }: { pro
       <TopBar title={ctx.project.name} back={() => go()}>
         <SyncDot />
         <button className="btn icon ghost" aria-label="הגדרות הפרויקט" aria-pressed={cur === "setup"} onClick={() => go("p", projectId, cur === "setup" ? "lesson" : "setup")}>
-          ⚙
+          <Icon name="settings" size={22} />
         </button>
       </TopBar>
 
@@ -105,9 +106,7 @@ export default function ProjectScreen({ projectId, tab = "lesson", date }: { pro
         <div className="inner">
           {tabs.map(([k, label, ico]) => (
             <button key={k} aria-current={cur === k ? "page" : undefined} onClick={() => go("p", projectId, k, ...(dated && date && (k === "lesson" || k === "ensembles") ? [date] : []))}>
-              <span className="ico" aria-hidden>
-                {ico}
-              </span>
+              <Icon name={ico} size={23} />
               {label}
             </button>
           ))}

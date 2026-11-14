@@ -1,3 +1,4 @@
+import { Icon } from "../components/Icon";
 import { useMemo, useState } from "react";
 import { Check, Confirm, Field, Sheet } from "../components/ui";
 import { newParticipant } from "../data/actions";
@@ -45,7 +46,7 @@ export default function PeopleTab({ ctx }: { ctx: ProjectCtx }) {
           </p>
         )}
         <button className="btn accent big" style={{ marginTop: 12 }} onClick={() => setEditing(newParticipant(ctx.project.id))}>
-          ＋ הוסף משתתף
+          <Icon name="plus" /> הוסף משתתף
         </button>
       </section>
       {inactive.length > 0 && (

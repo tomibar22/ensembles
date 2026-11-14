@@ -1,3 +1,4 @@
+import { Icon } from "../components/Icon";
 import { useMemo, useState } from "react";
 import { Check } from "../components/ui";
 import { clearDraw, saveDraw } from "../data/actions";
@@ -126,7 +127,7 @@ export default function EnsemblesTab({ ctx, date }: { ctx: ProjectCtx; date: str
           {rules.required.length ? rules.required.map((r) => ROLE_NAME[r]).join(" · ") : "חלוקה חופשית"}
           {rules.leader ? " · מוביל" : ""}
         </span>
-        <span className="muted">{rulesOpen ? "▲" : "▼"}</span>
+        <span className="muted"><Icon name={rulesOpen ? "up" : "down"} size={18} /></span>
       </button>
       {rulesOpen && (
         <div className="stack" style={{ marginTop: 12 }}>
@@ -237,7 +238,7 @@ export default function EnsemblesTab({ ctx, date }: { ctx: ProjectCtx; date: str
                   setMsg("העריכה האחרונה בוטלה.");
                 }}
               >
-                ↶ בטל
+                <Icon name="undo" size={18} /> בטל
               </button>
             )}
           </div>
@@ -269,7 +270,7 @@ export default function EnsemblesTab({ ctx, date }: { ctx: ProjectCtx; date: str
                 <AddPicker eng={eng} draw={draw} g={i} maxGroup={rules.maxGroup} run={run} close={() => setAdding(null)} />
               ) : (
                 <button className="chip sm dashed" style={{ marginTop: 10 }} onClick={() => (setAdding(i), setSel(null), setMsg(""))}>
-                  ＋ הוסף נגן
+                  <Icon name="plus" size={16} /> הוסף נגן
                 </button>
               )}
             </section>
@@ -297,7 +298,7 @@ export default function EnsemblesTab({ ctx, date }: { ctx: ProjectCtx; date: str
             </button>
             {rules.leader && (
               <button className="btn grow" onClick={() => store(withLeaders(draw, true))}>
-                ★ הגרל מובילים
+                <Icon name="star" size={18} /> הגרל מובילים
               </button>
             )}
             <button
@@ -332,8 +333,8 @@ function SeatChip({ seat, name, load, leader, rhythm, cls, onClick }: { seat: Se
   return (
     <button className={"chip" + (rhythm ? " rhythm" : "") + cls} onClick={onClick} aria-pressed={cls === " picked"}>
       {leader && (
-        <span aria-label="מוביל" title="מוביל">
-          ★
+        <span title="מוביל" style={{ color: "var(--late)" }}>
+          <Icon name="star" size={17} fill label="מוביל" />
         </span>
       )}
       <span>{name}</span>
@@ -454,7 +455,7 @@ function Tools({ ctx, eng, draw, sel, run, close, store }: { ctx: ProjectCtx; en
               close();
             }}
           >
-            ★ {isLeader ? "מוביל את ההרכב" : "קבע כמוביל"}
+            <Icon name="star" size={16} fill={isLeader} /> {isLeader ? "מוביל את ההרכב" : "קבע כמוביל"}
           </Pill>
         </ToolRow>
       )}

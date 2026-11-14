@@ -1,3 +1,4 @@
+import { Icon } from "../components/Icon";
 import { useState } from "react";
 import { Check, Field, Sheet, TopBar } from "../components/ui";
 import { connect, connected } from "../data/google";
@@ -53,7 +54,7 @@ export default function Settings({ email, onSignOut }: { email: string; onSignOu
                   {[x.has_grade && "שכבה", ...FEATURE_KEYS.filter((k) => x.features[k]).map((k) => FEATURE_LABEL[k])].filter(Boolean).join(" · ") || "בלי יכולות"}
                 </span>
               </span>
-              <span className="muted">‹</span>
+              <span className="muted"><Icon name="forward" size={18} /></span>
             </button>
           ))}
         </div>
@@ -61,7 +62,7 @@ export default function Settings({ email, onSignOut }: { email: string; onSignOu
           className="btn accent"
           onClick={() => setType({ id: uid(), name: "", has_grade: false, features: { journal: true }, fields: [], sort: types.length + 1, archived: false })}
         >
-          ＋ סוג חדש
+          <Icon name="plus" /> סוג חדש
         </button>
       </section>
 
@@ -75,7 +76,7 @@ export default function Settings({ email, onSignOut }: { email: string; onSignOu
             </button>
           ))}
           <button className="chip sm dashed" onClick={() => setInst({ name: "", role: "melody", is_unique: false, sort: instruments.length + 1 })}>
-            ＋ כלי
+            <Icon name="plus" size={16} /> כלי
           </button>
         </div>
       </section>

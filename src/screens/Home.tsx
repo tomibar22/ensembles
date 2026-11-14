@@ -1,3 +1,4 @@
+import { Icon } from "../components/Icon";
 import { useMemo, useState } from "react";
 import { Field, Sheet, TopBar } from "../components/ui";
 import { createProject } from "../data/actions";
@@ -62,15 +63,15 @@ export default function Home() {
       {active.map(card)}
 
       <button className="btn accent big" onClick={() => setAdding(true)}>
-        ＋ פרויקט חדש
+        <Icon name="plus" /> פרויקט חדש
       </button>
 
       <div className="row">
         <button className="btn grow" onClick={() => go("banks")}>
-          📚 הבנקים
+          <Icon name="bank" /> הבנקים
         </button>
         <button className="btn grow" onClick={() => go("settings")}>
-          ⚙ הגדרות
+          <Icon name="settings" /> הגדרות
         </button>
       </div>
 
