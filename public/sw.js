@@ -6,9 +6,10 @@
    - הדף (ניווט): רשת קודם, ומהמטמון רק כשאין רשת. כך גרסה חדשה מגיעה
      תמיד כשיש חיבור, ואין מצב של גרסה ישנה שנתקעת.
    - קבצי assets ופונטים: מהמטמון. שמם כולל hash, ולכן הם לא משתנים.
-   - Google (התחברות, Sheets, Docs): לא נוגעים. הם חייבים רשת חיה. */
+   - Supabase ו-Google: לא נוגעים. הם חייבים רשת חיה; הנתונים עצמם
+     נשמרים במכשיר על ידי האפליקציה (src/data/store.ts). */
 
-const CACHE = "ensembles-v1";
+const CACHE = "shiur-iltur-v1";
 const FONTS = ["fonts.googleapis.com", "fonts.gstatic.com"];
 // שרת שמחזיר Vary: Origin היה גורם לכך שקובץ שנשמר לא יימצא בבקשה הבאה
 const find = (req) => caches.match(req, { ignoreVary: true });

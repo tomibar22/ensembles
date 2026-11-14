@@ -2,3 +2,6 @@ node_modules
 dist
 .DS_Store
 *.tmp.mjs
+.env.local
+# נתוני ההגירה מכילים שמות תלמידים — לעולם לא בריפו
+migration-data/
