@@ -34,7 +34,7 @@ export default function MediaSection({ ctx, date }: { ctx: ProjectCtx; date: str
             <div key={m.id} className="list-row">
               <span aria-hidden>{m.kind === "video" ? "🎬" : "📎"}</span>
               <a className="grow" href={m.url} target="_blank" rel="noreferrer">
-                {m.title || m.filename}
+                <span dir="auto">{m.title || m.filename}</span>
                 {m.item_id && bank.get(m.item_id) && <span className="sub"> · {bank.get(m.item_id)!.title}</span>}
               </a>
               <button className="btn quiet sm" aria-label={`הסר את ${m.title}`} onClick={() => setRemoving(m)}>

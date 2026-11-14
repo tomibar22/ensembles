@@ -141,7 +141,7 @@ export default function Banks() {
             return (
               <button key={item.id} className="list-row" onClick={() => setOpen(item.id)}>
                 <span className="grow">
-                  <b>{item.title}</b>
+                  <b dir="auto">{item.title}</b>
                   {item.tags.map((tag) => (
                     <span key={tag} className="tag sky" style={{ marginInlineStart: 6 }}>
                       {tag}

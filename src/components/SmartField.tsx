@@ -69,7 +69,7 @@ export default function SmartField({ ctx, date, kind }: { ctx: ProjectCtx; date:
               onClick={() => removeLessonItem(link.id, ctx.project.id)}
               aria-label={`הסר את ${item.title}`}
             >
-              {item.title} <span aria-hidden>✕</span>
+              <span dir="auto">{item.title}</span> <span aria-hidden>✕</span>
             </button>
           ))}
         </div>
@@ -94,7 +94,7 @@ export default function SmartField({ ctx, date, kind }: { ctx: ProjectCtx; date:
         <div className="suggest">
           {suggestions.map((b) => (
             <button key={b.id} className="chip sm dashed" onMouseDown={(e) => e.preventDefault()} onClick={() => add({ id: b.id })}>
-              {b.title}
+              <span dir="auto">{b.title}</span>
             </button>
           ))}
           {q.trim() && !exact && (

@@ -221,6 +221,7 @@ function Description({ projectId, date, initial }: { projectId: string; date: st
       </span>
       <textarea
         className="field ruled"
+        rows={Math.max(5, text.split("\n").length + 1)}
         value={text}
         aria-label="תיאור חופשי של השיעור"
         placeholder="מה היה בשיעור — שורה לכל דבר"
