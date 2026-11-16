@@ -159,11 +159,17 @@ async function writeDoc(docId: string, blocks: DocBlock[]) {
 /** כותב את מסמך התיעוד של הפרויקט מחדש, מתוך מה ששמור במסד. */
 export async function syncDoc(projectId: string): Promise<void> {
   const refs = await ensureProjectFiles(projectId);
-  const t = getState().tables;
-  const project = t.projects.find((p) => p.id === projectId) as Project;
-  await writeDoc(refs.docId!, docBlocks(project, t.lessons, t.lesson_items, t.bank_items, t.media));
+  const blocksNow = () => {
+    const t = getState().tables;
+    const project = t.projects.find((p) => p.id === projectId) as Project;
+    return docBlocks(project, t.lessons, t.lesson_items, t.bank_items, t.media);
+  };
+  const written = blocksNow();
+  await writeDoc(refs.docId!, written);
+  /* שינוי שנרשם בזמן הכתיבה לא נכנס למסמך — המסמך נשאר "ממתין" ויתעדכן שוב. */
+  const behind = JSON.stringify(blocksNow()) !== JSON.stringify(written);
   const now = getState().tables.projects.find((p) => p.id === projectId) as Project;
-  patch("projects", { id: projectId }, { drive: { ...now.drive, dirty: false, syncedAt: new Date().toISOString() } });
+  patch("projects", { id: projectId }, { drive: { ...now.drive, dirty: behind, syncedAt: new Date().toISOString() } });
 }
 
 const CHUNK = 8 * 1024 * 1024; // כפולה של 256KB, כנדרש

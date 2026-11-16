@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import SmartField from "../components/SmartField";
 import { Confirm, Seg } from "../components/ui";
 import { deleteLesson, getMark, saveDraw, setDescription, writeMark } from "../data/actions";
-import { connect, connected, syncDoc } from "../data/google";
+import { connect, syncDoc } from "../data/google";
 import { go, useLessonEngine, type ProjectCtx } from "../data/hooks";
 import { useTables } from "../data/store";
 import { BANK_KINDS, BANK_LABEL, type Mark, type Participant } from "../data/types";
@@ -242,7 +242,10 @@ function Description({ projectId, date, initial }: { projectId: string; date: st
 function DocStatus({ ctx, err }: { ctx: ProjectCtx; err: string }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
+  const [confirmRewrite, setConfirmRewrite] = useState(false);
   const d = ctx.project.drive;
+  /* מסמך שנראה מעודכן נכתב מחדש רק באישור: עריכה ידנית בו תימחק. */
+  const upToDate = !!d.docId && !d.dirty;
   const run = async () => {
     setBusy(true);
     setMsg("");
@@ -266,12 +269,19 @@ function DocStatus({ ctx, err }: { ctx: ProjectCtx; err: string }) {
             פתח מסמך
           </a>
         )}
-        {(!d.docId || d.dirty || !connected()) && (
-          <button className="btn sm" onClick={run} disabled={busy}>
-            {d.docId ? "עדכן עכשיו" : "צור מסמך"}
-          </button>
-        )}
+        <button className="btn sm" onClick={upToDate ? () => setConfirmRewrite(true) : run} disabled={busy}>
+          {!d.docId ? "צור מסמך" : upToDate ? "כתוב מחדש" : "עדכן עכשיו"}
+        </button>
       </div>
+      {confirmRewrite && (
+        <Confirm
+          title="לכתוב את המסמך מחדש?"
+          body="המסמך ב-Google Docs ייכתב מחדש כולו מהתיעוד שבאפליקציה. מה שנערך ידנית בתוך המסמך יימחק — כדי לשמור שינוי, ערוך אותו כאן באפליקציה."
+          action="כתוב מחדש"
+          onConfirm={run}
+          onClose={() => setConfirmRewrite(false)}
+        />
+      )}
       {(msg || err) && (
         <p className="banner warn small" role="alert">
           {msg || err}
