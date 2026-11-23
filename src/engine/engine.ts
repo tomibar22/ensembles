@@ -78,7 +78,18 @@ export interface Option {
   biggest: number;
   smallest: number;
   doubling: number;
+  /** כמה פעמים חסר תפקיד חיוני בהרכב (הרכב בלי בס = 1) */
+  gaps: number;
+  /** הכי הרבה הרכבים שתלמיד אחד מנגן בהם */
+  busiest: number;
   fits: boolean;
+}
+
+/** בעיה בחלוקה. group = אינדקס ההרכב, או BENCH לבעיה כללית. */
+export interface Issue {
+  group: number;
+  kind: "missing" | "oversize" | "double" | "empty" | "teacher";
+  text: string;
 }
 
 export type EditResult = { draw: Draw; msg: string } | { error: string };
@@ -149,7 +160,12 @@ export function createEngine(opts: EngineOptions) {
 
   /* ============================ החלוקה ============================ */
 
-  function makeGroups(pool: Player[], k: number): Draw | null {
+  /**
+   * חלוקה אחת. במצב רגיל מחזירה null כשתפקיד חיוני לא מתמלא באחד ההרכבים;
+   * ב-`lenient` (המורה בחר מספר הרכבים שאי אפשר לספק) משאירה את החור
+   * פתוח — `issues` יגיד אותו במפורש.
+   */
+  function makeGroups(pool: Player[], k: number, lenient = false): Draw | null {
     const groups: Seat[][] = Array.from({ length: k }, () => []);
     const load: Record<string, number> = {};
     const place = (s: Player, inst: string, slot: Seat["slot"], g: number) => {
@@ -170,7 +186,10 @@ export function createEngine(opts: EngineOptions) {
         let ok = cands.filter((s) => (load[s.id] || 0) < (s.teacher ? 1 : rules.maxLoad) && fits(s));
         // אין מי שפנוי במכסה? התפקיד חייב להתמלא, ולכן חורגים ממנה
         if (!ok.length) ok = cands.filter(fits);
-        if (!ok.length) return null;
+        if (!ok.length) {
+          if (lenient) continue;
+          return null;
+        }
         // סדר: מי שעוד לא מנגן היום → המורה → מי שיכפיל הרכב
         const rank = (s: Player) => (s.teacher ? 0.5 : load[s.id] || 0);
         const key = (s: Player) => [rank(s), debt(s.id), rolesOf(s).length];
@@ -204,13 +223,13 @@ export function createEngine(opts: EngineOptions) {
 
     const bench: string[] = [];
     const filled = (g: number) => groups[g].filter((m) => m.slot === "fill").length;
-    for (const s of queue) {
+    const seat = (s: Player, oversize: boolean) => {
       let best = -1;
       let bestInst = "";
       let bestScore = Infinity;
       for (let g = 0; g < k; g++) {
         // תקרת הגודל נאכפת כאן, במקום שמגדיל הרכבים
-        if (groups[g].length >= rules.maxGroup) continue;
+        if (!oversize && groups[g].length >= rules.maxGroup) continue;
         const fam = groups[g].reduce((a, m) => a + pairN(s.id, m.id), 0);
         s.instruments.forEach((inst, ord) => {
           if (!free(g, inst) || inGroup(s, g)) return;
@@ -220,8 +239,15 @@ export function createEngine(opts: EngineOptions) {
           if (score < bestScore) (bestScore = score), (best = g), (bestInst = inst);
         });
       }
-      if (best < 0) bench.push(s.id);
-      else place(s, bestInst, "fill", best);
+      return best < 0 ? null : { g: best, inst: bestInst };
+    };
+    /* כולם מנגנים: מי שאין לו כיסא מתחת לתקרה נכנס להרכב הקטן שיש בו מקום
+       לכלי שלו, גם מעל התקרה — כשהמורה בחר מעט הרכבים, זה מה שהוא רוצה.
+       ההמלצה (`capacity`) עדיין מחפשת מספר שבו אף הרכב לא עובר את התקרה. */
+    for (const s of queue) {
+      const spot = seat(s, false) ?? seat(s, true);
+      if (!spot) bench.push(s.id);
+      else place(s, spot.inst, "fill", spot.g);
     }
 
     /* המורה, אם לא נדרש לאף כיסא, מצטרף להרכב הקטן ביותר שיש בו מקום לכלי שלו. */
@@ -277,12 +303,17 @@ export function createEngine(opts: EngineOptions) {
     return { ...res, groups, load };
   }
 
+  const gapCount = (res: Draw) => res.groups.reduce((a, g) => a + missingRoles(g).length, 0);
+
+  /** ניסיונות חלוקה. אם אף אחד לא מספק את החוקים — ניסיונות שמשאירים חורים. */
   const attempt = (pool: Player[], k: number, tries: number) => {
     const out: Draw[] = [];
     for (let t = 0; t < tries; t++) {
       const r = makeGroups(pool, k);
       if (r) out.push(r);
     }
+    if (!out.length && pool.length)
+      for (let t = 0; t < tries; t++) out.push(makeGroups(pool, k, true)!);
     return out;
   };
 
@@ -296,7 +327,8 @@ export function createEngine(opts: EngineOptions) {
     res.bench.forEach((id) => (fairness += BENCH_COST - debt(id) * 3));
     let variety = 0;
     res.groups.forEach((g) => g.forEach((a, i) => g.slice(i + 1).forEach((b) => (variety += pairN(a.id, b.id)))));
-    return fairness * 4 + variety + rnd() * 0.5;
+    // הרכב בלי תפקיד חיוני קורה רק בחלוקה מקלה — ושם הוא הדבר הראשון למזער
+    return gapCount(res) * BENCH_COST * 100 + fairness * 4 + variety + rnd() * 0.5;
   }
 
   function bestDraw(pool: Player[], k: number, tries = 160): Draw | null {
@@ -311,13 +343,17 @@ export function createEngine(opts: EngineOptions) {
     return enrichHarmony(best, pool);
   }
 
-  /** לכל מספר הרכבים אפשרי — מה הוא אומר בפועל: גדלים, כפילויות, יושבים. */
+  /**
+   * לכל מספר הרכבים — מה הוא אומר בפועל: גדלים, כפילויות, יושבים, חורים.
+   * המורה יכול לבחור כל מספר עד מספר התלמידים; כאן רק מתארים את המחיר.
+   */
   function options(pool: Player[], tries = 30): Option[] {
-    const top = Math.min(rules.maxGroups, Math.max(1, Math.floor(pool.length / MIN_GROUP)));
+    const top = Math.max(1, pool.filter((s) => !s.teacher).length);
     const out: Option[] = [];
     for (let k = 1; k <= top; k++) {
       let best: Option | null = null;
-      for (const r of attempt(pool, k, tries)) {
+      // מספרים גדולים הם תיאור בלבד — פחות ניסיונות, כדי שהמסך יגיב מהר בטלפון
+      for (const r of attempt(pool, k, k <= 8 ? tries : Math.ceil(tries / 4))) {
         const sizes = r.groups.map((g) => g.length);
         const cand: Option = {
           k,
@@ -325,10 +361,14 @@ export function createEngine(opts: EngineOptions) {
           biggest: Math.max(...sizes),
           smallest: Math.min(...sizes),
           doubling: Object.values(r.load).filter((n) => n > 1).length,
+          gaps: gapCount(r),
+          busiest: Math.max(0, ...Object.entries(r.load).filter(([id]) => !P(id).teacher).map(([, n]) => n)),
           fits: false,
         };
-        cand.fits = !cand.bench && cand.biggest <= rules.maxGroup;
-        if (!best || cand.bench < best.bench || (cand.bench === best.bench && cand.biggest < best.biggest)) best = cand;
+        cand.fits = !cand.gaps && !cand.bench && cand.biggest <= rules.maxGroup;
+        const better = (a: Option, b: Option) =>
+          a.gaps - b.gaps || a.bench - b.bench || a.busiest - b.busiest || a.biggest - b.biggest;
+        if (!best || better(cand, best) < 0) best = cand;
       }
       if (best) out.push(best);
     }
@@ -336,19 +376,22 @@ export function createEngine(opts: EngineOptions) {
   }
 
   /**
-   * כמה הרכבים מומלץ: הכי מעט הרכבים שבהם אף אחד לא יושב בחוץ ואף הרכב לא
-   * עובר את התקרה. `playable` הוא מה שמותר לבחור — רק מספרים שבהם כולם
-   * מנגנים, אלא אם אין כאלה.
+   * כמה הרכבים מומלץ: הכי מעט הרכבים שבהם כל ההרכבים שלמים, אף אחד לא
+   * יושב בחוץ ואף הרכב לא עובר את התקרה. כל המספרים ב-`options` מותרים;
+   * `max` הוא הכי הרבה הרכבים שלמים.
    */
   function capacity(pool: Player[]) {
     const opts = options(pool);
-    if (!opts.length) return { max: 1, rec: 1, options: [] as Option[], playable: [] as Option[] };
-    const max = Math.max(...opts.map((o) => o.k));
+    if (!opts.length) return { max: 1, rec: 1, options: [] as Option[] };
+    const whole = opts.filter((o) => !o.gaps);
+    const max = whole.length ? Math.max(...whole.map((o) => o.k)) : 1;
     const fit = opts.filter((o) => o.fits);
     const rec = fit.length
       ? Math.min(...fit.map((o) => o.k))
-      : opts.reduce((b, o) => (o.bench < b.bench || (o.bench === b.bench && o.biggest < b.biggest) ? o : b)).k;
-    return { max, rec, options: opts, playable: fit.length ? fit : opts };
+      : opts.reduce((b, o) =>
+          o.gaps < b.gaps || (o.gaps === b.gaps && (o.bench < b.bench || (o.bench === b.bench && o.biggest < b.biggest))) ? o : b
+        ).k;
+    return { max, rec, options: opts };
   }
 
   /* ==================== נוכחות שמשתנה באמצע השיעור ==================== */
@@ -519,32 +562,53 @@ export function createEngine(opts: EngineOptions) {
 
   /* ============================ עריכה ידנית ============================ */
 
+  /* העריכה הידנית חופשית: המורה מחליט. היא מסרבת רק למה שאין לו משמעות
+     (אותו נגן פעמיים באותו הרכב, כלי שהנגן לא מנגן), ואומרת במפורש כל
+     בעיה שהעריכה יצרה — הרכב בלי בס, הרכב מעל התקרה, שני מתופפים. */
+
+  /** כל מה שלא תקין בחלוקה, הרכב אחר הרכב. ריק = הכל לפי החוקים. */
+  function issues(res: Draw): Issue[] {
+    const out: Issue[] = [];
+    res.groups.forEach((g, i) => {
+      const n = i + 1;
+      if (!g.length) return out.push({ group: i, kind: "empty", text: `הרכב ${n} ריק` });
+      const miss = missingRoles(g);
+      if (miss.length) out.push({ group: i, kind: "missing", text: `הרכב ${n} בלי ${gapText(miss)}` });
+      if (g.length > rules.maxGroup)
+        out.push({ group: i, kind: "oversize", text: `הרכב ${n}: ${g.length} נגנים, מעל התקרה (${rules.maxGroup})` });
+      uniq(g.map((m) => m.inst))
+        .filter((inst) => catalog.unique(inst) && g.filter((m) => m.inst === inst).length > 1)
+        .forEach((inst) => out.push({ group: i, kind: "double", text: `הרכב ${n}: ${inst} × ${g.filter((m) => m.inst === inst).length}` }));
+    });
+    const teacherIn = res.groups.filter((g) => g.some((m) => P(m.id).teacher)).length;
+    if (teacherIn > 1) out.push({ group: BENCH, kind: "teacher", text: `המורה מופיע ב-${teacherIn} הרכבים` });
+    return out;
+  }
+
+  /** מה שהעריכה קלקלה — הבעיות שלא היו לפניה */
+  const after = (before: Draw, draw: Draw, msg: string): EditResult => {
+    const had = new Set(issues(before).map((x) => x.text));
+    const fresh = issues(draw).filter((x) => !had.has(x.text) && x.kind !== "empty");
+    return { draw, msg: fresh.length ? `${msg} שים לב: ${fresh.map((x) => x.text).join("; ")}.` : msg };
+  };
+
   type At = { g: number; id: string };
   const seatAt = (res: Draw, at: At) => (at.g === BENCH ? undefined : (res.groups[at.g] || []).find((m) => m.id === at.id));
   const present = (res: Draw, id: string) => res.bench.includes(id) || res.groups.some((g) => g.some((m) => m.id === id));
 
-  /** הכלים שהנגן יכול לנגן בהרכב נתון (ראשיים בלבד), הנוכחי קודם */
-  const fit = (id: string, current: string | undefined, group: Seat[]) =>
-    uniq([current, ...P(id).instruments].filter((i): i is string => !!i && P(id).instruments.includes(i))).filter(
-      (inst) => !catalog.unique(inst) || !group.some((m) => m.inst === inst)
-    );
-
-  function entry(group: Seat[], id: string, current: string | undefined, n: number) {
-    if (group.some((m) => m.id === id)) return { error: `${name(id)} כבר מנגן בהרכב ${n}` };
-    if (group.length >= rules.maxGroup) return { error: `הרכב ${n} מלא — ${rules.maxGroup} נגנים זה המקסימום` };
+  /**
+   * הכלי של נגן שנכנס להרכב: קודם כלי שממלא תפקיד חסר, אחר כך כלי שאין
+   * כמותו בהרכב, ובשוויון — הכלי שניגן עד עכשיו ואז לפי סדר הכלים שלו.
+   */
+  const pickInst = (id: string, current: string | undefined, group: Seat[]) => {
+    const p = P(id);
+    const list = uniq([current, ...p.instruments, ...(p.instruments.length ? [] : p.backup)].filter((i): i is string => !!i));
+    if (!list.length) return undefined;
     const gaps = missingRoles(group);
-    const optsInst = fit(id, current, group);
-    if (!optsInst.length) return { error: `אין כיסא פנוי ל${name(id)} בהרכב ${n}` };
+    const clash = (i: string) => (catalog.unique(i) && group.some((m) => m.inst === i) ? 1 : 0);
     const fills = (i: string) => (gaps.includes(roleOf(i)) ? 0 : 1);
-    const inst = [...optsInst].sort((a, b) => fills(a) - fills(b))[0];
-    return { inst, fillsGap: fills(inst) === 0 };
-  }
-
-  function without(res: Draw, at: At) {
-    const rest = res.groups[at.g].filter((m) => m.id !== at.id);
-    const miss = missingRoles(rest);
-    return miss.length ? { error: `הרכב ${at.g + 1} יישאר בלי ${gapText(miss)}` } : { rest };
-  }
+    return list.map((inst, ord) => ({ inst, ord })).sort((a, b) => fills(a.inst) - fills(b.inst) || clash(a.inst) - clash(b.inst) || a.ord - b.ord)[0].inst;
+  };
 
   function swapPlayers(res: Draw, a: At, b: At): EditResult {
     if (a.g === b.g) return { error: "שני הנגנים באותו מקום" };
@@ -557,20 +621,15 @@ export function createEngine(opts: EngineOptions) {
     const restB = rest(b);
     if (b.g !== BENCH && restB.some((m) => m.id === a.id)) return { error: `${name(a.id)} כבר מנגן בהרכב ${b.g + 1}` };
     if (a.g !== BENCH && restA.some((m) => m.id === b.id)) return { error: `${name(b.id)} כבר מנגן בהרכב ${a.g + 1}` };
-    const instA = b.g === BENCH ? null : fit(a.id, seatAt(res, a)?.inst, restB)[0];
-    const instB = a.g === BENCH ? null : fit(b.id, seatAt(res, b)?.inst, restA)[0];
-    if (b.g !== BENCH && !instA) return { error: `אין כיסא פנוי ל${name(a.id)} בהרכב ${b.g + 1}` };
-    if (a.g !== BENCH && !instB) return { error: `אין כיסא פנוי ל${name(b.id)} בהרכב ${a.g + 1}` };
+    const instA = b.g === BENCH ? null : pickInst(a.id, seatAt(res, a)?.inst, restB);
+    const instB = a.g === BENCH ? null : pickInst(b.id, seatAt(res, b)?.inst, restA);
+    if (b.g !== BENCH && !instA) return { error: `ל${name(a.id)} אין כלי רשום` };
+    if (a.g !== BENCH && !instB) return { error: `ל${name(b.id)} אין כלי רשום` };
     const groups = res.groups.map((g, i) => {
       if (i === a.g) return [...restA, seatOf(b.id, instB!)].sort(byOrder);
       if (i === b.g) return [...restB, seatOf(a.id, instA!)].sort(byOrder);
       return g;
     });
-    for (const i of [a.g, b.g]) {
-      if (i === BENCH) continue;
-      const miss = missingRoles(groups[i]);
-      if (miss.length) return { error: `הרכב ${i + 1} יישאר בלי ${gapText(miss)}` };
-    }
     const load = { ...res.load };
     let bench = res.bench;
     const toBench = (into: string, out: string) => {
@@ -579,34 +638,31 @@ export function createEngine(opts: EngineOptions) {
       if (!load[out]) delete load[out];
       // מי שעדיין מנגן בהרכב אחר רק מפנה כיסא — הוא לא עולה לספסל
       bench = res.bench.filter((s) => s !== into);
-      if (!load[out]) bench = [...bench, out];
+      if (!load[out] && !P(out).teacher) bench = [...bench, out];
     };
     if (a.g === BENCH) toBench(a.id, b.id);
     if (b.g === BENCH) toBench(b.id, a.id);
-    return { draw: { ...res, groups, load, bench }, msg: `${name(a.id)} ו${name(b.id)} הוחלפו.` };
+    return after(res, { ...res, groups, load, bench }, `${name(a.id)} ו${name(b.id)} הוחלפו.`);
   }
 
   function addPlayer(res: Draw, id: string, to: number): EditResult {
     if (!present(res, id)) return { error: "הנגן כבר לא בחלוקה" };
     if (!res.groups[to]) return { error: "אין הרכב כזה" };
+    if (res.groups[to].some((m) => m.id === id)) return { error: `${name(id)} כבר מנגן בהרכב ${to + 1}` };
     const n = res.load[id] || 0;
-    if (P(id).teacher && n >= 1) return { error: `${name(id)} נכנס להרכב אחד בלבד` };
     const current = res.groups.flat().find((m) => m.id === id)?.inst;
-    const dest = entry(res.groups[to], id, current, to + 1);
-    if ("error" in dest) return { error: dest.error as string };
-    if (n >= rules.maxLoad && !dest.fillsGap)
-      return { error: `${name(id)} כבר מנגן ב-${n} הרכבים — עוד אחד רק אם ההרכב חסר תפקיד שהוא ממלא` };
-    return {
-      draw: {
+    const inst = pickInst(id, current, res.groups[to]);
+    if (!inst) return { error: `ל${name(id)} אין כלי רשום` };
+    return after(
+      res,
+      {
         ...res,
-        groups: res.groups.map((g, i) => (i === to ? [...g, seatOf(id, dest.inst!)].sort(byOrder) : g)),
+        groups: res.groups.map((g, i) => (i === to ? [...g, seatOf(id, inst)].sort(byOrder) : g)),
         load: { ...res.load, [id]: n + 1 },
         bench: res.bench.filter((x) => x !== id),
       },
-      msg: n
-        ? `${name(id)} מנגן עכשיו גם בהרכב ${to + 1} (${dest.inst}) — ×${n + 1}.`
-        : `${name(id)} הצטרף להרכב ${to + 1} (${dest.inst}).`,
-    };
+      n ? `${name(id)} מנגן עכשיו גם בהרכב ${to + 1} (${inst}) — ×${n + 1}.` : `${name(id)} הצטרף להרכב ${to + 1} (${inst}).`
+    );
   }
 
   function movePlayer(res: Draw, from: At, to: number): EditResult {
@@ -615,40 +671,38 @@ export function createEngine(opts: EngineOptions) {
     const s = seatAt(res, from);
     if (!s) return { error: "הנגן כבר לא בחלוקה" };
     if (!res.groups[to]) return { error: "אין הרכב כזה" };
-    const dest = entry(res.groups[to], s.id, s.inst, to + 1);
-    if ("error" in dest) return { error: dest.error as string };
-    const left = without(res, from);
-    if ("error" in left) return { error: left.error as string };
-    return {
-      draw: {
+    if (res.groups[to].some((m) => m.id === s.id)) return { error: `${name(s.id)} כבר מנגן בהרכב ${to + 1}` };
+    const inst = pickInst(s.id, s.inst, res.groups[to])!;
+    return after(
+      res,
+      {
         ...res,
         groups: res.groups.map((g, i) =>
-          i === from.g ? left.rest! : i === to ? [...g, seatOf(s.id, dest.inst!)].sort(byOrder) : g
+          i === from.g ? g.filter((m) => m.id !== s.id) : i === to ? [...g, seatOf(s.id, inst)].sort(byOrder) : g
         ),
       },
-      msg: `${name(s.id)} עבר מהרכב ${from.g + 1} להרכב ${to + 1} (${dest.inst}).`,
-    };
+      `${name(s.id)} עבר מהרכב ${from.g + 1} להרכב ${to + 1} (${inst}).`
+    );
   }
 
   function removePlayer(res: Draw, at: At): EditResult {
     if (at.g === BENCH) return { error: "הוא כבר על הספסל" };
     const s = seatAt(res, at);
     if (!s) return { error: "הנגן כבר לא בחלוקה" };
-    const left = without(res, at);
-    if ("error" in left) return { error: left.error as string };
     const n = (res.load[at.id] || 1) - 1;
     const load = { ...res.load };
     if (n > 0) load[at.id] = n;
     else delete load[at.id];
-    return {
-      draw: {
+    return after(
+      res,
+      {
         ...res,
-        groups: res.groups.map((g, i) => (i === at.g ? left.rest! : g)),
+        groups: res.groups.map((g, i) => (i === at.g ? g.filter((m) => m.id !== at.id) : g)),
         load,
         bench: n > 0 || P(at.id).teacher ? res.bench : [...res.bench, at.id],
       },
-      msg: `${name(at.id)} יצא מהרכב ${at.g + 1}` + (n > 0 ? " ונשאר בהרכב אחר." : P(at.id).teacher ? "." : " ועבר לספסל."),
-    };
+      `${name(at.id)} יצא מהרכב ${at.g + 1}` + (n > 0 ? " ונשאר בהרכב אחר." : P(at.id).teacher ? "." : " ועבר לספסל.")
+    );
   }
 
   /** החלפת כלי בהרכב. כלי משני מותר כאן — זו החלטת מורה, לא הגרלה. */
@@ -659,13 +713,47 @@ export function createEngine(opts: EngineOptions) {
     const p = P(s.id);
     if (![...p.instruments, ...p.backup].includes(inst)) return { error: `${p.name} לא מנגן ב${inst}` };
     const rest = res.groups[at.g].filter((m) => m.id !== at.id);
-    if (catalog.unique(inst) && rest.some((m) => m.inst === inst)) return { error: `בהרכב ${at.g + 1} כבר יש ${inst}` };
     const next = [...rest, seatOf(s.id, inst)].sort(byOrder);
-    const miss = missingRoles(next);
-    if (miss.length) return { error: `הרכב ${at.g + 1} יישאר בלי ${gapText(miss)}` };
+    return after(
+      res,
+      { ...res, groups: res.groups.map((g, i) => (i === at.g ? next : g)) },
+      `${p.name} עבר מ${s.inst} ל${inst} בהרכב ${at.g + 1}.`
+    );
+  }
+
+  /** הרכב ריק נוסף בסוף — ממלאים אותו בהעברות */
+  function addGroup(res: Draw): EditResult {
     return {
-      draw: { ...res, groups: res.groups.map((g, i) => (i === at.g ? next : g)) },
-      msg: `${p.name} עבר מ${s.inst} ל${inst} בהרכב ${at.g + 1}.`,
+      draw: { ...res, groups: [...res.groups, []], leaders: res.leaders ? [...res.leaders, null] : undefined },
+      msg: `נוסף הרכב ${res.groups.length + 1}. העבר אליו נגנים, או הוסף מהספסל.`,
+    };
+  }
+
+  /** מחיקת הרכב: מי שלא מנגן בהרכב אחר יורד לספסל. */
+  function removeGroup(res: Draw, g: number): EditResult {
+    if (!res.groups[g]) return { error: "אין הרכב כזה" };
+    if (res.groups.length === 1) return { error: "זה ההרכב היחיד — אפשר לנקות את החלוקה" };
+    const load = { ...res.load };
+    const benched: string[] = [];
+    res.groups[g].forEach((m) => {
+      load[m.id] = (load[m.id] || 1) - 1;
+      if (load[m.id] > 0) return;
+      delete load[m.id];
+      if (!P(m.id).teacher) benched.push(m.id);
+    });
+    const draw: Draw = {
+      ...res,
+      groups: res.groups.filter((_, i) => i !== g),
+      load,
+      bench: [...res.bench, ...benched.filter((id) => !res.bench.includes(id))],
+      leaders: res.leaders?.filter((_, i) => i !== g),
+    };
+    return {
+      draw,
+      msg:
+        `הרכב ${g + 1} נמחק` +
+        (benched.length ? ` — ${benched.map(name).join(", ")} ${benched.length > 1 ? "עברו" : "עבר"} לספסל.` : ".") +
+        (g < res.groups.length - 1 ? " ההרכבים שאחריו מוספרו מחדש." : ""),
     };
   }
 
@@ -718,6 +806,9 @@ export function createEngine(opts: EngineOptions) {
     movePlayer,
     removePlayer,
     changeInstrument,
+    addGroup,
+    removeGroup,
+    issues,
     pickLeaders,
     name,
     player: P,

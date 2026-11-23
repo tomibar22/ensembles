@@ -1,6 +1,6 @@
 import { Icon } from "../components/Icon";
 import { useMemo, useState } from "react";
-import { Check } from "../components/ui";
+import { Check, Confirm } from "../components/ui";
 import { clearDraw, saveDraw } from "../data/actions";
 import { go, useLessonEngine, type ProjectCtx } from "../data/hooks";
 import { patch } from "../data/store";
@@ -12,8 +12,8 @@ type Sel = { g: number; id: string };
 
 /**
  * החלוקה להרכבים של השיעור. נשמרת מעצמה — היא חלק מהשיעור, והשיעורים
- * הבאים מתאזנים לפיה. עריכה ידנית שומרת על החוקים: מה שהיה שובר הרכב
- * מעומעם, ולחיצה עליו אומרת למה.
+ * הבאים מתאזנים לפיה. עריכה ידנית חופשית לגמרי: המורה מחליט, והמסך אומר
+ * בכל הרכב מה לא לפי החוקים (חסר בס, מעל התקרה…) ומציע להשלים.
  */
 export default function EnsemblesTab({ ctx, date }: { ctx: ProjectCtx; date: string }) {
   const eng = useLessonEngine(ctx, date);
@@ -27,10 +27,14 @@ export default function EnsemblesTab({ ctx, date }: { ctx: ProjectCtx; date: str
   const [err, setErr] = useState("");
   const [rulesOpen, setRulesOpen] = useState(false);
   const [shareNote, setShareNote] = useState("");
+  const [dropGroup, setDropGroup] = useState<number | null>(null);
 
-  const caps = useMemo(() => engine.capacity(pool), [engine, pool]);
+  /* חישוב האפשרויות כבד יחסית; הוא תלוי רק במי שנוכח ובחוקים, לא בעריכות */
+  const capsKey = pool.map((p) => p.id).join(",") + JSON.stringify(rules);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const caps = useMemo(() => engine.capacity(pool), [capsKey]);
   const gaps = useMemo(() => engine.emptyRoles(pool), [engine, pool]);
-  const k = kPick !== null && caps.playable.some((o) => o.k === kPick) ? kPick : caps.rec;
+  const k = kPick !== null && caps.options.some((o) => o.k === kPick) ? kPick : caps.rec;
   const students = pool.filter((p) => !p.teacher).length;
   const name = engine.name;
 
@@ -44,17 +48,12 @@ export default function EnsemblesTab({ ctx, date }: { ctx: ProjectCtx; date: str
     const r = engine.bestDraw(pool, k);
     setSel(null);
     setAdding(null);
-    setUndo(null);
+    setUndo(draw ?? null);
     setMsg("");
-    if (!r) {
-      setErr(
-        `אי אפשר להרכיב ${k} הרכבים מ-${students} הנוכחים` +
-          (rules.required.length ? ` — בכל הרכב חייבים ${rules.required.map((x) => ROLE_NAME[x]).join(", ")}.` : ".") +
-          " נסה פחות הרכבים, בדוק את הנוכחות, או שנה את החוקים."
-      );
-      return;
-    }
+    if (!r) return setErr("אין נוכחים לחלק.");
     setErr("");
+    const found = engine.issues(r);
+    if (found.length) setMsg(`חולק ל-${k} הרכבים, אבל לא הכל לפי החוקים — הבעיות מסומנות בכל הרכב.`);
     store(withLeaders({ ...r, k, rules }, true));
   };
 
@@ -62,7 +61,7 @@ export default function EnsemblesTab({ ctx, date }: { ctx: ProjectCtx; date: str
     if ("error" in out) return setMsg(out.error);
     if (!draw) return;
     setUndo(draw);
-    store(withLeaders({ ...draw, ...out.draw, msg: out.msg }));
+    store(withLeaders({ ...draw, ...out.draw, k: out.draw.groups.length, msg: out.msg }));
     setMsg(out.msg);
     setSel(null);
     setAdding(null);
@@ -77,20 +76,20 @@ export default function EnsemblesTab({ ctx, date }: { ctx: ProjectCtx; date: str
   const toggleRole = (r: Role) =>
     setRules({ required: rules.required.includes(r) ? rules.required.filter((x) => x !== r) : ROLES.filter((x) => x === r || rules.required.includes(x)) });
 
-  /* כשנבחר נגן — מסמנים מראש עם מי אפשר להחליף אותו */
-  const swapOk = useMemo(() => {
-    if (!draw || !sel) return null;
-    const ok = new Set<string>();
-    const consider = (g: number, id: string) => {
-      if (g === sel.g && id === sel.id) return;
-      if (!("error" in engine.swapPlayers(draw, sel, { g, id }))) ok.add(`${g}|${id}`);
-    };
-    draw.groups.forEach((grp, g) => grp.forEach((m) => consider(g, m.id)));
-    draw.bench.forEach((id) => consider(BENCH, id));
-    return ok;
-  }, [draw, sel, engine]);
-  const chipState = (g: number, id: string) =>
-    !sel ? "" : sel.g === g && sel.id === id ? " picked" : swapOk?.has(`${g}|${id}`) ? "" : " blocked";
+  const chipState = (g: number, id: string) => (sel && sel.g === g && sel.id === id ? " picked" : "");
+  const problems = useMemo(() => (draw ? engine.issues(draw) : []), [draw, engine]);
+  const fixable = useMemo(() => (draw && problems.some((x) => x.kind === "missing") ? engine.repairDraw(draw, pool).filled : []), [draw, problems, engine, pool]);
+  const fixGaps = () => {
+    if (!draw) return;
+    const out = engine.repairDraw(draw, pool);
+    run({
+      draw: out.draw,
+      msg:
+        out.filled.map((f) => `${name(f.id)} נכנס ב${f.inst} להרכב ${f.group + 1}`).join(", ") +
+        "." +
+        (out.unfixable.length ? ` עדיין: ${engine.issues(out.draw).filter((x) => x.kind === "missing").map((x) => x.text).join("; ")} — אין מי שימלא.` : ""),
+    });
+  };
   const pick = (g: number, id: string) => {
     if (!draw) return;
     setAdding(null);
@@ -195,19 +194,21 @@ export default function EnsemblesTab({ ctx, date }: { ctx: ProjectCtx; date: str
         </div>
         {gaps.length > 0 && (
           <p className="banner warn" style={{ marginTop: 10 }} role="alert">
-            אין {gaps.map((r) => ROLE_PLURAL[r]).join(" ואין ")} נוכחים — אי אפשר לחלק לפי החוקים. אפשר לכבות את החובה ב“החוקים”.
+            אין {gaps.map((r) => ROLE_PLURAL[r]).join(" ואין ")} נוכחים — ההרכבים יהיו בלי {gaps.map((r) => ROLE_NAME[r]).join(" ובלי ")}. אפשר לכבות את החובה ב“החוקים”.
           </p>
         )}
         <div className="row nowrap" style={{ marginTop: 10 }}>
           <select className="field grow" aria-label="מספר הרכבים" value={k} onChange={(e) => setKPick(Number(e.target.value))}>
-            {caps.playable.map((o) => (
+            {caps.options.map((o) => (
               <option key={o.k} value={o.k}>
-                {o.k} הרכבים · {o.smallest === o.biggest ? o.biggest : `${o.smallest}–${o.biggest}`} נגנים
+                {o.k === 1 ? "הרכב אחד" : `${o.k} הרכבים`} · {o.smallest === o.biggest ? o.biggest : `${o.smallest}–${o.biggest}`} נגנים
                 {o.bench ? ` · ${o.bench} בחוץ` : ""}
+                {o.gaps ? ` · ${o.gaps} תפקידים חסרים` : ""}
+                {o.busiest > rules.maxLoad ? ` · מישהו ב-${o.busiest}` : ""}
                 {o.k === caps.rec ? " · מומלץ" : ""}
               </option>
             ))}
-            {!caps.playable.length && <option value={1}>הרכב אחד</option>}
+            {!caps.options.length && <option value={1}>הרכב אחד</option>}
           </select>
           <button className="btn primary" onClick={doDraw}>
             {draw ? "חלק מחדש" : "חלק"}
@@ -226,7 +227,7 @@ export default function EnsemblesTab({ ctx, date }: { ctx: ProjectCtx; date: str
         <>
           <div className="row spread">
             <p className="sub grow">
-              {sel ? "בחר עם מי להחליף — החיוורים אינם אפשריים. לחיצה חוזרת מבטלת." : "לחץ על נגן כדי להחליף, להעביר, להוציא או לשנות כלי."}
+              {sel ? "לחץ על נגן אחר כדי להחליף ביניהם, או בחר פעולה למטה. לחיצה חוזרת מבטלת." : "לחץ על נגן כדי להחליף, להעביר, להוציא או לשנות כלי."}
             </p>
             {undo && (
               <button
@@ -243,14 +244,51 @@ export default function EnsemblesTab({ ctx, date }: { ctx: ProjectCtx; date: str
             )}
           </div>
 
+          {problems.some((x) => x.kind === "missing") && (
+            <div className="banner warn row spread" role="alert">
+              <span className="grow">יש הרכבים בלי תפקיד חיוני.</span>
+              {fixable.length > 0 && (
+                <button className="btn sm" onClick={fixGaps}>
+                  השלם אוטומטית
+                </button>
+              )}
+            </div>
+          )}
+          {problems
+            .filter((x) => x.group === BENCH)
+            .map((x) => (
+              <p key={x.text} className="banner warn small">
+                {x.text}
+              </p>
+            ))}
+
           {draw.groups.map((g, i) => (
             <section key={i} className="card">
               <div className="row spread" style={{ marginBottom: 10 }}>
                 <h2 className="row" style={{ gap: 8 }}>
                   הרכב <span className="group-num">{i + 1}</span>
                 </h2>
-                <span className="sub">{g.length} נגנים</span>
+                <span className="row nowrap" style={{ gap: 4 }}>
+                  <span className="sub">{g.length} נגנים</span>
+                  {draw.groups.length > 1 && (
+                    <button
+                      className="btn sm icon quiet"
+                      aria-label={`מחק את הרכב ${i + 1}`}
+                      onClick={() => (g.length ? setDropGroup(i) : run(engine.removeGroup(draw, i)))}
+                    >
+                      <Icon name="x" size={18} />
+                    </button>
+                  )}
+                </span>
               </div>
+              {problems
+                .filter((x) => x.group === i && x.kind !== "empty")
+                .map((x) => (
+                  <p key={x.text} className="banner warn small" style={{ marginBottom: 8 }}>
+                    {x.text}
+                  </p>
+                ))}
+              {!g.length && <p className="sub" style={{ marginBottom: 8 }}>הרכב ריק — הוסף נגנים, או בחר נגן בהרכב אחר והעבר אותו לכאן.</p>}
               <div className="chips">
                 {g.map((m) => (
                   <SeatChip
@@ -275,6 +313,32 @@ export default function EnsemblesTab({ ctx, date }: { ctx: ProjectCtx; date: str
               )}
             </section>
           ))}
+
+          <button className="btn" onClick={() => run(engine.addGroup(draw))}>
+            <Icon name="plus" size={18} /> הוסף הרכב
+          </button>
+
+          {dropGroup !== null && draw.groups[dropGroup] && (
+            <Confirm
+              title={`למחוק את הרכב ${dropGroup + 1}?`}
+              body={(() => {
+                const ids = draw.groups[dropGroup].map((m) => m.id);
+                const toBench = ids.filter((id) => (draw.load[id] || 1) <= 1 && id !== TEACHER_ID);
+                const stay = ids.filter((id) => (draw.load[id] || 1) > 1);
+                return (
+                  <>
+                    ההרכב יימחק מהחלוקה.
+                    {toBench.length > 0 && <> {toBench.map(name).join(", ")} {toBench.length > 1 ? "יעברו" : "יעבור"} לספסל.</>}
+                    {stay.length > 0 && <> {stay.map(name).join(", ")} {stay.length > 1 ? "ממשיכים" : "ממשיך"} בהרכב אחר.</>}
+                    {" "}אפשר לבטל מיד אחרי.
+                  </>
+                );
+              })()}
+              action="מחק הרכב"
+              onConfirm={() => run(engine.removeGroup(draw, dropGroup))}
+              onClose={() => setDropGroup(null)}
+            />
+          )}
 
           {draw.bench.length > 0 && (
             <section className="card dashed">
@@ -366,9 +430,9 @@ function Stepper({ label, value, min, max, onChange }: { label: string; value: n
 
 type Eng = ReturnType<typeof useLessonEngine>;
 
-function Pill({ ok = true, on = false, danger = false, onClick, children }: { ok?: boolean; on?: boolean; danger?: boolean; onClick: () => void; children: React.ReactNode }) {
+function Pill({ on = false, danger = false, onClick, children }: { on?: boolean; danger?: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
-    <button className={"chip sm" + (on ? " on" : "") + (ok || on ? "" : " blocked")} style={danger ? { color: "var(--warn)", borderColor: "var(--warn)" } : undefined} aria-pressed={on || undefined} onClick={onClick}>
+    <button className={"chip sm" + (on ? " on" : "")} style={danger ? { color: "var(--warn)", borderColor: "var(--warn)" } : undefined} aria-pressed={on || undefined} onClick={onClick}>
       {children}
     </button>
   );
@@ -385,7 +449,7 @@ function ToolRow({ label, children }: { label: string; children: React.ReactNode
   );
 }
 
-/** מה אפשר לעשות עם הנגן שנבחר. כל כפתור מחושב מול המנוע — מה שמעומעם יסורב, עם סיבה. */
+/** מה אפשר לעשות עם הנגן שנבחר. הכל מותר; מה שיוצא מהחוקים נאמר בהודעה ובהרכב עצמו. */
 function Tools({ ctx, eng, draw, sel, run, close, store }: { ctx: ProjectCtx; eng: Eng; draw: DrawData; sel: Sel; run: (r: EditResult) => void; close: () => void; store: (d: DrawData) => void }) {
   const e = eng.engine;
   const onBench = sel.g === BENCH;
@@ -411,7 +475,7 @@ function Tools({ ctx, eng, draw, sel, run, close, store }: { ctx: ProjectCtx; en
       {onBench && others.length > 0 && (
         <ToolRow label="הוסף להרכב">
           {others.map((i) => (
-            <Pill key={i} ok={!("error" in e.addPlayer(draw, sel.id, i))} onClick={() => run(e.addPlayer(draw, sel.id, i))}>
+            <Pill key={i} onClick={() => run(e.addPlayer(draw, sel.id, i))}>
               הרכב {i + 1}
             </Pill>
           ))}
@@ -420,16 +484,16 @@ function Tools({ ctx, eng, draw, sel, run, close, store }: { ctx: ProjectCtx; en
       {!onBench && others.length > 0 && (
         <ToolRow label="העבר להרכב">
           {others.map((i) => (
-            <Pill key={i} ok={!("error" in e.movePlayer(draw, sel, i))} onClick={() => run(e.movePlayer(draw, sel, i))}>
+            <Pill key={i} onClick={() => run(e.movePlayer(draw, sel, i))}>
               הרכב {i + 1}
             </Pill>
           ))}
         </ToolRow>
       )}
-      {!onBench && !p.teacher && others.length > 0 && (
+      {!onBench && others.length > 0 && (
         <ToolRow label="הוסף גם להרכב (ינגן בשניים)">
           {others.map((i) => (
-            <Pill key={i} ok={!("error" in e.addPlayer(draw, sel.id, i))} onClick={() => run(e.addPlayer(draw, sel.id, i))}>
+            <Pill key={i} onClick={() => run(e.addPlayer(draw, sel.id, i))}>
               הרכב {i + 1}
             </Pill>
           ))}
@@ -438,7 +502,7 @@ function Tools({ ctx, eng, draw, sel, run, close, store }: { ctx: ProjectCtx; en
       {!onBench && insts.length > 1 && (
         <ToolRow label="כלי בהרכב הזה">
           {insts.map((inst) => (
-            <Pill key={inst} on={inst === seat!.inst} ok={!("error" in e.changeInstrument(draw, sel, inst))} onClick={() => run(e.changeInstrument(draw, sel, inst))}>
+            <Pill key={inst} on={inst === seat!.inst} onClick={() => run(e.changeInstrument(draw, sel, inst))}>
               {inst}
               {!p.instruments.includes(inst) && " (משני)"}
             </Pill>
@@ -461,7 +525,7 @@ function Tools({ ctx, eng, draw, sel, run, close, store }: { ctx: ProjectCtx; en
       )}
       {!onBench && (
         <ToolRow label="הוצאה">
-          <Pill danger ok={!("error" in e.removePlayer(draw, sel))} onClick={() => run(e.removePlayer(draw, sel))}>
+          <Pill danger onClick={() => run(e.removePlayer(draw, sel))}>
             {load > 1 ? `הוצא מהרכב ${sel.g + 1}` : "הוצא לספסל"}
           </Pill>
         </ToolRow>
@@ -475,10 +539,10 @@ function AddPicker({ eng, draw, g, maxGroup, run, close }: { eng: Eng; draw: Dra
   const e = eng.engine;
   const here = new Set(draw.groups[g].map((m) => m.id));
   const playing = [...new Set(draw.groups.flat().map((m) => m.id))]
-    .filter((id) => !here.has(id) && !e.player(id).teacher)
+    .filter((id) => !here.has(id))
     .sort((a, b) => (draw.load[a] || 0) - (draw.load[b] || 0) || e.name(a).localeCompare(e.name(b), "he"));
   const pill = (id: string, tag?: string) => (
-    <Pill key={id} ok={!("error" in e.addPlayer(draw, id, g))} onClick={() => run(e.addPlayer(draw, id, g))}>
+    <Pill key={id} onClick={() => run(e.addPlayer(draw, id, g))}>
       {e.name(id)} <span className="inst">{e.player(id).instruments[0]}</span>
       {tag && <span className="tag">{tag}</span>}
     </Pill>
@@ -491,7 +555,7 @@ function AddPicker({ eng, draw, g, maxGroup, run, close }: { eng: Eng; draw: Dra
           סגור
         </button>
       </div>
-      {draw.groups[g].length >= maxGroup && <p className="banner warn small">ההרכב מלא ({maxGroup} נגנים). אפשר להחליף נגן, או להוציא מישהו.</p>}
+      {draw.groups[g].length >= maxGroup && <p className="sub">בהרכב כבר {draw.groups[g].length} נגנים (התקרה {maxGroup}) — אפשר להוסיף בכל זאת.</p>}
       {draw.bench.length > 0 && <ToolRow label="יושבים בחוץ">{draw.bench.map((id) => pill(id))}</ToolRow>}
       {playing.length > 0 && <ToolRow label="כבר מנגנים בהרכב אחר — יקבלו כיסא נוסף">{playing.map((id) => pill(id, `×${draw.load[id] || 1}`))}</ToolRow>}
       <p className="sub" style={{ marginTop: 8 }}>

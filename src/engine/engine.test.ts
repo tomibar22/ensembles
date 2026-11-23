@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BENCH, DEFAULT_RULES, NO_HISTORY, createEngine, pairKey, seededRandom } from "./engine";
+import { DEFAULT_RULES, NO_HISTORY, createEngine, pairKey, seededRandom } from "./engine";
 import type { Draw, History, Player, Rules } from "./engine";
 import { CATALOG, G11, G9, TEACHER } from "./fixtures";
 
@@ -42,8 +42,36 @@ describe.each(SEEDS)("חלוקה (seed %i)", (seed) => {
   it("ההמלצה היא הכי מעט הרכבים שבהם כולם מנגנים", () => {
     expect(eng([...G11, TEACHER], seed).capacity([...G11, TEACHER]).rec).toBe(4);
     expect(eng([...G9, TEACHER], seed).capacity([...G9, TEACHER]).rec).toBe(3);
-    const c = eng(G11, seed).capacity(G11);
-    c.playable.forEach((o) => expect(o.bench).toBe(0));
+  });
+
+  it("אפשר לבחור כל מספר הרכבים — גם כזה שאינו מומלץ, עם המחיר שלו", () => {
+    const pool = [...G11, TEACHER];
+    const c = eng(pool, seed).capacity(pool);
+    expect(c.options.map((o) => o.k)).toEqual(G11.map((_, i) => i + 1));
+    const three = c.options.find((o) => o.k === 3)!;
+    expect(three.gaps).toBe(0);
+    expect(three.fits).toBe(false); // 22 תלמידים ב-3 הרכבים: הרכב עובר את 7
+    expect(three.bench).toBe(0); // אבל כולם מנגנים — מעל התקרה, לא על הספסל
+    const d = eng(pool, seed).bestDraw(pool, 3, 40)!;
+    expect(d.groups.length).toBe(3);
+    expect(d.bench).toEqual([]);
+    d.groups.forEach((g) => expect(eng(pool, seed).missingRoles(g)).toEqual([]));
+  });
+
+  it("יותר הרכבים ממה שאפשר לספק: החלוקה קורית, והחורים נאמרים", () => {
+    const pool = G9.filter((p) => p.instruments[0] !== "תופים" || p.name === "ניר");
+    for (const k of [1, 4, 7, pool.length]) {
+      const e = eng(pool, seed, { required: ["drums", "bass", "harmony", "melody"] });
+      const d = e.bestDraw(pool, k, 20)!;
+      expect(d.groups.length).toBe(k);
+      loadOk(d);
+      // כל נוכח בחלוקה או על הספסל
+      pool.forEach((p) => expect(!!d.load[p.id] || d.bench.includes(p.id)).toBe(true));
+      const gaps = d.groups.reduce((a, g) => a + e.missingRoles(g).length, 0);
+      const missing = e.issues(d).filter((x) => x.kind === "missing");
+      expect(missing.length).toBe(d.groups.filter((g) => g.length && e.missingRoles(g).length).length);
+      if (!gaps) expect(missing).toEqual([]);
+    }
   });
 
   it("בסיסט יחיד מנגן בכל ההרכבים, גם מעל המכסה", () => {
@@ -72,7 +100,13 @@ describe.each(SEEDS)("חלוקה (seed %i)", (seed) => {
   it("חוקים מותאמים: בלי חובת בס ותופים אפשר לחלק כיתה בלי ריתמיקה", () => {
     const pool = G11.filter((p) => !["תופים", "בס"].includes(p.instruments[0]) && !p.backup.length);
     expect(eng(pool, seed).emptyRoles(pool)).toEqual(["drums", "bass"]);
-    expect(eng(pool, seed).bestDraw(pool, 3, 20)).toBeNull();
+    const loose = eng(pool, seed).bestDraw(pool, 3, 20)!;
+    expect(loose.groups.length).toBe(3);
+    expect(eng(pool, seed).issues(loose).filter((x) => x.kind === "missing").map((x) => x.text)).toEqual([
+      "הרכב 1 בלי תופים ובלי בס",
+      "הרכב 2 בלי תופים ובלי בס",
+      "הרכב 3 בלי תופים ובלי בס",
+    ]);
     const e = eng(pool, seed, { required: ["harmony", "melody"] });
     expect(e.emptyRoles(pool)).toEqual([]);
     const k = e.capacity(pool).rec;
@@ -162,74 +196,99 @@ describe.each(SEEDS)("שינויים באמצע שיעור (seed %i)", (seed) =>
   });
 });
 
-describe.each(SEEDS)("עריכה ידנית (seed %i)", (seed) => {
+describe.each(SEEDS)("עריכה ידנית חופשית (seed %i)", (seed) => {
   const pool = [...G11, TEACHER];
   const start = () => {
     const e = eng(pool, seed);
     return { e, d: e.bestDraw(pool, 4, 40)! };
   };
+  const ok = (r: ReturnType<ReturnType<typeof eng>["swapPlayers"]>) => {
+    if ("error" in r) throw new Error(r.error);
+    loadOk(r.draw);
+    return r;
+  };
 
-  it("כל החלפה שמתקבלת משאירה את ההרכבים שלמים; סירוב מגיע עם סיבה", () => {
+  it("כל החלפה בין הרכבים מתקבלת; מה שנשבר נאמר בהודעה", () => {
     const { e, d } = start();
-    let ok = 0;
     d.groups[0].forEach((a) =>
       d.groups[1].forEach((b) => {
-        const r = e.swapPlayers(d, { g: 0, id: a.id }, { g: 1, id: b.id });
-        if ("error" in r) return expect(r.error.length).toBeGreaterThan(3);
-        ok++;
-        r.draw.groups.forEach((g) => expect(e.missingRoles(g)).toEqual([]));
-        loadOk(r.draw);
+        if (a.id === b.id || d.groups[1].some((m) => m.id === a.id) || d.groups[0].some((m) => m.id === b.id)) return;
+        const r = ok(e.swapPlayers(d, { g: 0, id: a.id }, { g: 1, id: b.id }));
+        const fresh = e.issues(r.draw).filter((x) => !e.issues(d).some((y) => y.text === x.text));
+        fresh.forEach((x) => expect(r.msg).toContain(x.text));
       })
     );
-    expect(ok).toBeGreaterThan(0);
   });
 
-  it("הוצאה שמשאירה הרכב בלי תפקיד מסורבת", () => {
+  it("הוצאת הבסיסט מותרת, וההרכב מסומן כחסר בס", () => {
     const { e, d } = start();
     const bass = d.groups[0].find((m) => m.inst === "בס")!;
-    const r = e.removePlayer(d, { g: 0, id: bass.id });
-    expect("error" in r && r.error).toContain("בלי בס");
+    const r = ok(e.removePlayer(d, { g: 0, id: bass.id }));
+    expect(r.msg).toContain("הרכב 1 בלי בס");
+    expect(e.issues(r.draw).map((x) => x.text)).toContain("הרכב 1 בלי בס");
+    // והשלמה אוטומטית מחזירה בס להרכב
+    const fixed = e.repairDraw(r.draw, pool);
+    expect(e.missingRoles(fixed.draw.groups[0])).toEqual([]);
   });
 
-  it("מי שהוצא ואין לו הרכב אחר יורד לספסל, ומשם אפשר להחזיר אותו", () => {
+  it("העברה בין הרכבים מותרת גם כשהיא משאירה חור או מגדילה מעל התקרה", () => {
     const { e, d } = start();
-    const solo = d.groups.flat().find((m) => d.load[m.id] === 1 && m.slot === "fill" && d.groups.flat().filter((x) => x.inst === m.inst && d.groups.findIndex((g) => g.includes(x)) === d.groups.findIndex((g) => g.includes(m))).length >= 1)!;
-    const g = d.groups.findIndex((grp) => grp.includes(solo));
-    const melodic = d.groups[g].filter((m) => CATALOG.role(m.inst) === "melody").length;
-    const r = e.removePlayer(d, { g, id: solo.id });
-    if (melodic === 1) return expect("error" in r).toBe(true);
-    if ("error" in r) throw new Error(r.error);
+    let cur = d;
+    // מעבירים את כל הרכב 1 להרכב 2, נגן אחר נגן
+    for (const m of [...d.groups[0]]) {
+      if (cur.groups[1].some((x) => x.id === m.id)) continue;
+      cur = ok(e.movePlayer(cur, { g: 0, id: m.id }, 1)).draw;
+    }
+    expect(cur.groups[1].length).toBeGreaterThan(7);
+    expect(e.issues(cur).some((x) => x.kind === "oversize" && x.group === 1)).toBe(true);
+  });
+
+  it("מהספסל אפשר להוסיף לכל הרכב, והמורה יכול להיכנס לשני הרכבים", () => {
+    const { e, d } = start();
+    const solo = d.groups[0].find((m) => d.load[m.id] === 1 && m.id !== TEACHER.id)!;
+    const r = ok(e.removePlayer(d, { g: 0, id: solo.id }));
     expect(r.draw.bench).toContain(solo.id);
-    const back = e.swapPlayers(r.draw, { g: BENCH, id: solo.id }, { g: 0, id: r.draw.groups[0][0].id });
-    if (!("error" in back)) loadOk(back.draw);
-    const add = e.addPlayer(r.draw, solo.id, g);
-    if ("error" in add) throw new Error(add.error);
-    expect(add.draw.bench).not.toContain(solo.id);
-    loadOk(add.draw);
-  });
-
-  it("אי אפשר לחרוג מגודל ההרכב, והמורה נכנס להרכב אחד", () => {
-    const { e, d } = start();
-    const full = d.groups.findIndex((g) => g.length >= 7);
-    if (full >= 0) {
-      const other = d.groups.flat().find((m) => !d.groups[full].some((x) => x.id === m.id))!;
-      const r = e.addPlayer(d, other.id, full);
-      expect("error" in r && r.error).toContain("מלא");
+    for (let g = 0; g < 4; g++) {
+      const add = ok(e.addPlayer(r.draw, solo.id, g));
+      expect(add.draw.bench).not.toContain(solo.id);
     }
     const tg = d.groups.findIndex((g) => g.some((m) => m.id === TEACHER.id));
     if (tg >= 0) {
-      const r = e.addPlayer(d, TEACHER.id, (tg + 1) % 4);
-      expect("error" in r).toBe(true);
+      const t = ok(e.addPlayer(d, TEACHER.id, (tg + 1) % 4));
+      expect(e.issues(t.draw).some((x) => x.kind === "teacher")).toBe(true);
     }
+    // הסירוב היחיד: אותו נגן פעמיים באותו הרכב
+    expect("error" in e.addPlayer(d, d.groups[0][0].id, 0)).toBe(true);
   });
 
-  it("החלפת כלי לכלי משני מותרת רק כשההרכב נשאר שלם", () => {
+  it("כלי משני מותר תמיד; בס שני בהרכב מסומן", () => {
     const e = eng(G11, seed);
     const d = e.bestDraw(G11, 4, 40)!;
     const p = G11.find((x) => x.backup.includes("בס"))!;
     const g = d.groups.findIndex((grp) => grp.some((m) => m.id === p.id));
-    const r = e.changeInstrument(d, { g, id: p.id }, "בס");
-    expect("error" in r).toBe(true); // יש כבר בס בהרכב, או שהוא ההרמוני היחיד
+    const r = ok(e.changeInstrument(d, { g, id: p.id }, "בס"));
+    expect(r.draw.groups[g].find((m) => m.id === p.id)!.inst).toBe("בס");
+    if (d.groups[g].some((m) => m.inst === "בס")) expect(e.issues(r.draw).some((x) => x.kind === "double")).toBe(true);
+    expect("error" in e.changeInstrument(d, { g, id: p.id }, "חצוצרה")).toBe(true);
+  });
+
+  it("הוספה ומחיקה של הרכבים: מי שלא מנגן בהרכב אחר יורד לספסל", () => {
+    const { e, d } = start();
+    const added = ok(e.addGroup(d)).draw;
+    expect(added.groups.length).toBe(5);
+    expect(e.issues(added).map((x) => x.kind)).toContain("empty");
+    const someone = d.groups[0].find((m) => m.id !== TEACHER.id)!;
+    const moved = ok(e.movePlayer(added, { g: 0, id: someone.id }, 4)).draw;
+    expect(moved.groups[4].map((m) => m.id)).toEqual([someone.id]);
+
+    const r = ok(e.removeGroup(d, 1));
+    expect(r.draw.groups.length).toBe(3);
+    d.groups[1].forEach((m) => {
+      if (m.id === TEACHER.id) return;
+      if ((d.load[m.id] || 0) > 1) expect(r.draw.bench).not.toContain(m.id);
+      else expect(r.draw.bench).toContain(m.id);
+    });
+    expect("error" in e.removeGroup({ ...d, groups: [d.groups[0]] }, 0)).toBe(true);
   });
 });
 
